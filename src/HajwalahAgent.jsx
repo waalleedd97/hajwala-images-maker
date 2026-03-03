@@ -6,8 +6,10 @@ import { useState, useEffect, useRef } from "react";
 // ============================================================
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const GEMINI_MODEL = "gemini-3.1-flash-image-preview";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+const TEXT_MODEL = "gemini-2.5-flash";
+const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const TEXT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+const IMAGE_URL = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 const PURPLE = {
   50: "#faf5ff",
@@ -470,7 +472,7 @@ ${rejections}
       addThought("🎨 بناء البرومبت بناءً على الأنماط المتعلمة...");
 
       const prompt = buildAgentPrompt();
-      const textResponse = await fetch(GEMINI_URL, {
+      const textResponse = await fetch(TEXT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -538,7 +540,7 @@ CRITICAL STYLE INSTRUCTION: I am providing ${Math.min(styleRefs.length, 3)} refe
       const imageTimeout = setTimeout(() => imageController.abort(), 60000);
 
       try {
-        const imageResponse = await fetch(GEMINI_URL, {
+        const imageResponse = await fetch(IMAGE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: imageController.signal,
@@ -738,7 +740,7 @@ CRITICAL STYLE INSTRUCTION: I am providing ${Math.min(styleRefs.length, 3)} refe
 
       const mimeType = styleImageFile.type || "image/png";
 
-      const response = await fetch(GEMINI_URL, {
+      const response = await fetch(TEXT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
