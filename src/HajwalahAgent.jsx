@@ -523,17 +523,30 @@ ${rejections}
       const baseImagePrompt = content.imagePrompt
         || `Hajwalah Corsa 2 racing game social media post, ${content.title}, dark background, neon purple lighting, drift smoke, Arabic gaming aesthetic, dramatic, high quality`;
 
-      const imagePromptText = hasStyleRefs
-        ? `${baseImagePrompt}
+      const postTitle = content.title || "";
+      const postHashtags = (content.hashtags || []).join(" ");
 
-CRITICAL STYLE INSTRUCTION: I am providing ${Math.min(styleRefs.length, 3)} reference screenshots from the actual game "Hajwalah Corsa 2". You MUST analyze these reference images and replicate their exact visual style:
-- Match the Unity 3D mid-fidelity rendering style visible in the references
-- Replicate the same lighting quality, texture resolution, and material shading
-- Use the same color grading and atmospheric effects shown in the reference screenshots
-- Match the KSA (Saudi Arabia) environmental aesthetics: desert terrain, urban Saudi streets, drift arenas
-- DO NOT generate photorealistic images. The output must look like it belongs in the same game as the reference screenshots
-- Use visual inference from the provided images for 100% stylistic match
-- Pay attention to: car models style, smoke/particle effects, road surfaces, sky rendering, UI overlay style`
+      const imagePromptText = hasStyleRefs
+        ? `Create a new, original image for a social media post about: "${postTitle}"
+
+VISUAL STYLE ONLY — learn from the ${Math.min(styleRefs.length, 3)} attached reference images:
+- Copy ONLY the visual style: 3D rendering quality, lighting, color grading, material textures, atmospheric effects
+- Copy ONLY the design language: composition layout, typography placement style, gradient overlays, card formatting
+- Match the Unity 3D mid-fidelity game aesthetic (NOT photorealistic)
+- Match the KSA environment aesthetics: desert terrain, Saudi streets, drift arenas
+
+CRITICAL — DO NOT copy from the reference images:
+- DO NOT copy, reproduce, or reuse ANY text or words from the reference images
+- DO NOT copy specific car models, specific scenes, or specific content from the references
+- The reference images are ONLY for learning the art style and design format
+
+NEW CONTENT TO USE (this is the ONLY text that should appear in the image):
+- Title: ${postTitle}
+- Hashtags: ${postHashtags}
+- Game name: هجولة كورسا ٢ / Hajwalah Corsa 2
+
+Generate a completely new scene that matches the visual style of the references but illustrates the NEW post topic above.
+${baseImagePrompt}`
         : baseImagePrompt;
 
       // Build multimodal parts: reference images (up to 3) + text prompt
