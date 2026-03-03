@@ -230,13 +230,46 @@ const extractJSON = (text) => {
 // ============================================================
 // MAIN APP
 // ============================================================
+// localStorage helpers
+const STORAGE_KEY = "hajwalah-agent-state";
+
+const loadPersistedState = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn("Failed to load persisted state:", e);
+  }
+  return null;
+};
+
+const DEFAULT_MEMORY = {
+  styleProfile: {
+    preferredColors: ["#7e22ce", "#1a1a2e", "#ff6b35"],
+    preferredComposition: "dynamic-diagonal",
+    textPlacement: "bottom-right",
+    arabicFont: "bold-kufi",
+    confidence: 0.15,
+  },
+  learnedPatterns: [
+    { pattern: "دخان التفحيط يكون كثيف", weight: 0.8, source: "initial" },
+    { pattern: "الخلفية داكنة مع إضاءة نيون", weight: 0.7, source: "initial" },
+    { pattern: "النص العربي بخط عريض", weight: 0.9, source: "initial" },
+  ],
+  rejectionReasons: [],
+  successfulPrompts: [],
+  totalInteractions: 0,
+};
+
 export default function HajwalahAgent() {
+  const saved = useRef(loadPersistedState()).current;
+
   const [currentPage, setCurrentPage] = useState("home");
-  const [agentLevel, setAgentLevel] = useState(1);
-  const [agentXP, setAgentXP] = useState(0);
-  const [totalGenerated, setTotalGenerated] = useState(0);
-  const [acceptedCount, setAcceptedCount] = useState(0);
-  const [rejectedCount, setRejectedCount] = useState(0);
+  const [agentLevel, setAgentLevel] = useState(saved?.agentLevel ?? 1);
+  const [agentXP, setAgentXP] = useState(saved?.agentXP ?? 0);
+  const [totalGenerated, setTotalGenerated] = useState(saved?.totalGenerated ?? 0);
+  const [acceptedCount, setAcceptedCount] = useState(saved?.acceptedCount ?? 0);
+  const [rejectedCount, setRejectedCount] = useState(saved?.rejectedCount ?? 0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [feedbackGiven, setFeedbackGiven] = useState(false);
@@ -259,24 +292,24 @@ export default function HajwalahAgent() {
   const [isAnalyzingStyle, setIsAnalyzingStyle] = useState(false);
   const [styleAnalysisResult, setStyleAnalysisResult] = useState(null);
 
-  // Agent Memory System (simulated)
-  const [agentMemory, setAgentMemory] = useState({
-    styleProfile: {
-      preferredColors: ["#7e22ce", "#1a1a2e", "#ff6b35"],
-      preferredComposition: "dynamic-diagonal",
-      textPlacement: "bottom-right",
-      arabicFont: "bold-kufi",
-      confidence: 0.15,
-    },
-    learnedPatterns: [
-      { pattern: "دخان التفحيط يكون كثيف", weight: 0.8, source: "initial" },
-      { pattern: "الخلفية داكنة مع إضاءة نيون", weight: 0.7, source: "initial" },
-      { pattern: "النص العربي بخط عريض", weight: 0.9, source: "initial" },
-    ],
-    rejectionReasons: [],
-    successfulPrompts: [],
-    totalInteractions: 0,
-  });
+  // Agent Memory System — persisted via localStorage
+  const [agentMemory, setAgentMemory] = useState(saved?.agentMemory ?? DEFAULT_MEMORY);
+
+  // Persist agent state to localStorage on every relevant change
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        agentLevel,
+        agentXP,
+        totalGenerated,
+        acceptedCount,
+        rejectedCount,
+        agentMemory,
+      }));
+    } catch (e) {
+      console.warn("Failed to persist state:", e);
+    }
+  }, [agentLevel, agentXP, totalGenerated, acceptedCount, rejectedCount, agentMemory]);
 
   const buildAgentPrompt = () => {
     const postType = postTypes.find((p) => p.id === selectedPostType);
@@ -372,27 +405,52 @@ ${rejections}
       const imagePromptText = content.imagePrompt
         || `Hajwalah Corsa 2 racing game social media post, ${content.title}, dark background, neon purple lighting, drift smoke, Arabic gaming aesthetic, dramatic, high quality`;
 
-      const imageResponse = await fetch(GEMINI_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: imagePromptText }] }],
-        }),
-      });
+      const imageController = new AbortController();
+      const imageTimeout = setTimeout(() => imageController.abort(), 60000);
 
-      if (imageResponse.ok) {
-        const imageData = await imageResponse.json();
-        const parts = imageData.candidates?.[0]?.content?.parts || [];
-        const imagePart = parts.find((p) => p.inlineData);
-        if (imagePart) {
-          const { mimeType, data } = imagePart.inlineData;
-          setGeneratedImage(`data:${mimeType};base64,${data}`);
-          addThought("✅ تم توليد الصورة بنجاح!");
+      try {
+        const imageResponse = await fetch(GEMINI_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: imageController.signal,
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: imagePromptText }] }],
+            generationConfig: {
+              responseModalities: ["TEXT", "IMAGE"],
+              imageConfig: {
+                aspectRatio: "1:1",
+              },
+            },
+          }),
+        });
+
+        clearTimeout(imageTimeout);
+
+        if (imageResponse.ok) {
+          const imageData = await imageResponse.json();
+          const parts = imageData.candidates?.[0]?.content?.parts || [];
+          const imagePart = parts.find((p) => p.inlineData);
+          if (imagePart) {
+            const { mimeType, data } = imagePart.inlineData;
+            setGeneratedImage(`data:${mimeType};base64,${data}`);
+            addThought("✅ تم توليد الصورة بنجاح!");
+          } else {
+            addThought("⚠️ الصورة لم تُولّد — سيتم عرض النص فقط");
+          }
         } else {
-          addThought("⚠️ الصورة لم تُولّد — سيتم عرض النص فقط");
+          const errBody = await imageResponse.text().catch(() => "");
+          console.error("Image API error:", imageResponse.status, errBody);
+          addThought(`⚠️ خطأ في توليد الصورة (${imageResponse.status}) — سيتم عرض النص فقط`);
         }
-      } else {
-        addThought("⚠️ خطأ في توليد الصورة — سيتم عرض النص فقط");
+      } catch (imgErr) {
+        clearTimeout(imageTimeout);
+        if (imgErr.name === "AbortError") {
+          console.error("Image generation timed out after 60s");
+          addThought("⚠️ انتهت مهلة توليد الصورة — سيتم عرض النص فقط");
+        } else {
+          console.error("Image generation error:", imgErr);
+          addThought("⚠️ خطأ في توليد الصورة — سيتم عرض النص فقط");
+        }
       }
 
       setTotalGenerated((p) => p + 1);
