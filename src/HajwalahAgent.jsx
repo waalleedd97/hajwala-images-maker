@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from "react";
 // ============================================================
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const TEXT_MODEL = "gemini-2.5-flash";
+const TEXT_MODEL = "gemini-3.1-pro-preview";
 const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 const TEXT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 const IMAGE_URL = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
