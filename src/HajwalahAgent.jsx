@@ -458,14 +458,23 @@ ${rejections}
 مستوى ثقة الوكيل: ${confidence}%
 عدد التفاعلات السابقة: ${agentMemory.totalInteractions}
 
+===== قواعد مهمة =====
+الأنماط المتعلمة أعلاه هي أوامر مطلقة وليست اقتراحات. إذا كان هناك نمط يقول "لا تكتب نص على الصورة" أو أي قيد مشابه، يجب أن ينعكس ذلك في الـ imagePrompt الذي تكتبه.
+========================
+
 اكتب بوست تسويقي بالعامية السعودية للعبة هجولة كورسا ٢ يتضمن:
 1. عنوان جذاب (سطر واحد)
 2. نص البوست (2-3 أسطر بالعامية السعودية، يكون حماسي وجذاب)
 3. وصف تفصيلي للصورة المقترحة بالإنجليزي (image prompt) — يجب أن يتضمن:
    - الألوان: ${sp.preferredColors.join(", ")}
    - التكوين: ${sp.preferredComposition}
-   - النص بخط ${fontMap[sp.arabicFont] || sp.arabicFont} في موقع ${placementMap[sp.textPlacement] || sp.textPlacement}
-   - تباين لوني عالي مع نص عربي عريض
+   ${(() => {
+     const noTextKw = ["لا تكتب", "لا نص", "بدون نص", "بدون كتابة", "no text", "don't write", "do not write"];
+     const hasNoText = agentMemory.learnedPatterns.some((p) => noTextKw.some((kw) => p.pattern.toLowerCase().includes(kw)));
+     return hasNoText
+       ? "- ⛔ لا تضف أي نص أو كتابة على الصورة — الصورة بصرية فقط بدون أي حروف"
+       : `- النص بخط ${fontMap[sp.arabicFont] || sp.arabicFont} في موقع ${placementMap[sp.textPlacement] || sp.textPlacement}\n   - تباين لوني عالي مع نص عربي عريض`;
+   })()}
 4. هاشتاقات مناسبة (3-5)
 
 أجب بصيغة JSON فقط بدون أي نص إضافي:
@@ -548,31 +557,71 @@ ${rejections}
       const postTitle = content.title || "";
       const postHashtags = (content.hashtags || []).join(" ");
 
-      // Style profile constraints — always applied
-      const styleConstraints = `
-MANDATORY STYLE PROFILE (from agent memory — highest priority):
-- Color palette: ${sp.preferredColors.join(", ")} (use these as the dominant colors)
-- Composition: ${sp.preferredComposition} layout
-- Arabic font style: ${sp.arabicFont} (bold Kufi-style Arabic typography)
-- Text placement: ${sp.textPlacement} of the image
-- High contrast between text and background
-- Bold Arabic text is required`;
+      // ===== MEMORY HIERARCHY: Manual patterns override system defaults =====
+      const allPatterns = agentMemory.learnedPatterns || [];
+      const noTextKeywords = ["لا تكتب", "لا نص", "بدون نص", "بدون كتابة", "no text", "don't write", "do not write"];
+      const hasNoTextConstraint = allPatterns.some((p) =>
+        noTextKeywords.some((kw) => p.pattern.toLowerCase().includes(kw))
+      );
 
-      const learnedPatternsForImage = agentMemory.learnedPatterns
+      // Separate patterns into constraints (prohibitions) and style patterns
+      const constraintPatterns = allPatterns
         .filter((p) => p.weight >= 0.7)
+        .filter((p) => /لا |بدون |no |don't |do not |تجنب/.test(p.pattern.toLowerCase()))
+        .map((p) => `- ⛔ ${p.pattern}`)
+        .join("\n");
+
+      const stylePatterns = allPatterns
+        .filter((p) => p.weight >= 0.7)
+        .filter((p) => !/لا |بدون |no |don't |do not |تجنب/.test(p.pattern.toLowerCase()))
         .map((p) => `- ${p.pattern}`)
         .join("\n");
 
+      // Build style constraints — conditionally include text/font directives
+      const styleConstraints = hasNoTextConstraint
+        ? `
+MANDATORY STYLE PROFILE (from agent memory):
+- Color palette: ${sp.preferredColors.join(", ")} (use these as the dominant colors)
+- Composition: ${sp.preferredComposition} layout
+- High contrast and dramatic lighting`
+        : `
+MANDATORY STYLE PROFILE (from agent memory):
+- Color palette: ${sp.preferredColors.join(", ")} (use these as the dominant colors)
+- Composition: ${sp.preferredComposition} layout
+- Arabic font style: ${sp.arabicFont}
+- Text placement: ${sp.textPlacement} of the image
+- High contrast between text and background
+- Bold Arabic text`;
+
+      // Build text content section — only if no "no text" constraint
+      const textContentSection = hasNoTextConstraint
+        ? `
+TEXT RULES (from user memory — ABSOLUTE PRIORITY):
+- DO NOT render, write, overlay, or embed ANY text on the image
+- DO NOT add titles, hashtags, watermarks, or any written words
+- The image must be purely visual — no typography whatsoever
+- This rule overrides ALL other instructions about text`
+        : `
+TEXT TO RENDER ON THE IMAGE:
+- Title: ${postTitle}
+- Hashtags: ${postHashtags}
+- Game name: هجولة كورسا ٢ / Hajwalah Corsa 2`;
+
       const imagePromptText = hasStyleRefs
         ? `Create a new, original image for a social media post about: "${postTitle}"
+
+===== USER CONSTRAINTS (HIGHEST PRIORITY — override everything else) =====
+${constraintPatterns || "None"}
+======================================================================
 ${styleConstraints}
 
 LEARNED VISUAL PATTERNS:
-${learnedPatternsForImage}
+${stylePatterns}
+${textContentSection}
 
 VISUAL STYLE FROM REFERENCE IMAGES — learn from the ${Math.min(styleRefs.length, 3)} attached screenshots:
 - Copy ONLY the visual style: 3D rendering quality, lighting, color grading, material textures, atmospheric effects
-- Copy ONLY the design language: composition layout, typography placement style, gradient overlays, card formatting
+- Copy ONLY the design language: composition layout, gradient overlays, card formatting
 - Match the Unity 3D mid-fidelity game aesthetic (NOT photorealistic)
 - Match the KSA environment aesthetics: desert terrain, Saudi streets, drift arenas
 
@@ -581,23 +630,18 @@ CRITICAL — DO NOT copy from the reference images:
 - DO NOT copy specific car models, specific scenes, or specific content from the references
 - The reference images are ONLY for learning the art style and design format
 
-NEW CONTENT TO USE (this is the ONLY text that should appear in the image):
-- Title: ${postTitle}
-- Hashtags: ${postHashtags}
-- Game name: هجولة كورسا ٢ / Hajwalah Corsa 2
-
 Generate a completely new scene that matches the visual style of the references but illustrates the NEW post topic above.
 ${baseImagePrompt}`
         : `${baseImagePrompt}
+
+===== USER CONSTRAINTS (HIGHEST PRIORITY — override everything else) =====
+${constraintPatterns || "None"}
+======================================================================
 ${styleConstraints}
 
 LEARNED VISUAL PATTERNS:
-${learnedPatternsForImage}
-
-NEW CONTENT TO USE (this is the ONLY text that should appear in the image):
-- Title: ${postTitle}
-- Hashtags: ${postHashtags}
-- Game name: هجولة كورسا ٢ / Hajwalah Corsa 2`;
+${stylePatterns}
+${textContentSection}`;
 
       // Build multimodal parts: reference images (up to 3) + text prompt
       const imageParts = [];
