@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 // وكيل التسويق الذكي — هجولة كورسا ٢
 // ============================================================
 
-const GEMINI_API_KEY = "AIzaSyB0lnUQ1_jJK14fesHM5yGF9ahVaPxo248";
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const GEMINI_MODEL = "gemini-3.1-flash-image-preview";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
