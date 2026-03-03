@@ -427,10 +427,27 @@ export default function HajwalahAgent() {
       : "لا يوجد رفض سابق";
     const confidence = Math.round(agentMemory.styleProfile.confidence * 100);
 
+    const sp = agentMemory.styleProfile;
+    const colorNames = {
+      "#7e22ce": "بنفسجي", "#1a1a2e": "أسود غامق", "#ff6b35": "برتقالي",
+      "#000000": "أسود", "#ffffff": "أبيض", "#e74c3c": "أحمر", "#3498db": "أزرق",
+    };
+    const colorsAr = sp.preferredColors.map((c) => colorNames[c] || c).join("، ");
+    const compMap = { "dynamic-diagonal": "قطري ديناميكي", "centered": "مركزي", "rule-of-thirds": "قاعدة الأثلاث" };
+    const fontMap = { "bold-kufi": "كوفي عريض", "naskh": "نسخ", "ruqaa": "رقعة" };
+    const placementMap = { "bottom-right": "أسفل-يمين", "center": "وسط", "top-right": "أعلى-يمين" };
+
     return `أنت وكيل تسويق ذكي متخصص في لعبة "هجولة كورسا ٢" — لعبة تفحيط وسيارات عربية سعودية.
 
 نوع البوست المطلوب: ${postType?.label || "عام"} — ${postType?.desc || ""}
 ${promptInput ? `توجيه إضافي من المستخدم: ${promptInput}` : ""}
+
+===== ملف الستايل المتعلّم (أولوية قصوى) =====
+الألوان المفضلة: ${colorsAr} (${sp.preferredColors.join(", ")})
+التكوين: ${compMap[sp.preferredComposition] || sp.preferredComposition}
+الخط العربي: ${fontMap[sp.arabicFont] || sp.arabicFont}
+موقع النص: ${placementMap[sp.textPlacement] || sp.textPlacement}
+===============================================
 
 الأنماط المتعلمة من تفاعلات المستخدم:
 ${patterns}
@@ -444,7 +461,11 @@ ${rejections}
 اكتب بوست تسويقي بالعامية السعودية للعبة هجولة كورسا ٢ يتضمن:
 1. عنوان جذاب (سطر واحد)
 2. نص البوست (2-3 أسطر بالعامية السعودية، يكون حماسي وجذاب)
-3. وصف تفصيلي للصورة المقترحة بالإنجليزي (image prompt)
+3. وصف تفصيلي للصورة المقترحة بالإنجليزي (image prompt) — يجب أن يتضمن:
+   - الألوان: ${sp.preferredColors.join(", ")}
+   - التكوين: ${sp.preferredComposition}
+   - النص بخط ${fontMap[sp.arabicFont] || sp.arabicFont} في موقع ${placementMap[sp.textPlacement] || sp.textPlacement}
+   - تباين لوني عالي مع نص عربي عريض
 4. هاشتاقات مناسبة (3-5)
 
 أجب بصيغة JSON فقط بدون أي نص إضافي:
@@ -520,16 +541,36 @@ ${rejections}
       addThought("🖼️ إرسال لنموذج Nano Banana 2 لتوليد الصورة...");
 
       const hasStyleRefs = styleRefs.length > 0;
+      const sp = agentMemory.styleProfile;
       const baseImagePrompt = content.imagePrompt
         || `Hajwalah Corsa 2 racing game social media post, ${content.title}, dark background, neon purple lighting, drift smoke, Arabic gaming aesthetic, dramatic, high quality`;
 
       const postTitle = content.title || "";
       const postHashtags = (content.hashtags || []).join(" ");
 
+      // Style profile constraints — always applied
+      const styleConstraints = `
+MANDATORY STYLE PROFILE (from agent memory — highest priority):
+- Color palette: ${sp.preferredColors.join(", ")} (use these as the dominant colors)
+- Composition: ${sp.preferredComposition} layout
+- Arabic font style: ${sp.arabicFont} (bold Kufi-style Arabic typography)
+- Text placement: ${sp.textPlacement} of the image
+- High contrast between text and background
+- Bold Arabic text is required`;
+
+      const learnedPatternsForImage = agentMemory.learnedPatterns
+        .filter((p) => p.weight >= 0.7)
+        .map((p) => `- ${p.pattern}`)
+        .join("\n");
+
       const imagePromptText = hasStyleRefs
         ? `Create a new, original image for a social media post about: "${postTitle}"
+${styleConstraints}
 
-VISUAL STYLE ONLY — learn from the ${Math.min(styleRefs.length, 3)} attached reference images:
+LEARNED VISUAL PATTERNS:
+${learnedPatternsForImage}
+
+VISUAL STYLE FROM REFERENCE IMAGES — learn from the ${Math.min(styleRefs.length, 3)} attached screenshots:
 - Copy ONLY the visual style: 3D rendering quality, lighting, color grading, material textures, atmospheric effects
 - Copy ONLY the design language: composition layout, typography placement style, gradient overlays, card formatting
 - Match the Unity 3D mid-fidelity game aesthetic (NOT photorealistic)
@@ -547,7 +588,16 @@ NEW CONTENT TO USE (this is the ONLY text that should appear in the image):
 
 Generate a completely new scene that matches the visual style of the references but illustrates the NEW post topic above.
 ${baseImagePrompt}`
-        : baseImagePrompt;
+        : `${baseImagePrompt}
+${styleConstraints}
+
+LEARNED VISUAL PATTERNS:
+${learnedPatternsForImage}
+
+NEW CONTENT TO USE (this is the ONLY text that should appear in the image):
+- Title: ${postTitle}
+- Hashtags: ${postHashtags}
+- Game name: هجولة كورسا ٢ / Hajwalah Corsa 2`;
 
       // Build multimodal parts: reference images (up to 3) + text prompt
       const imageParts = [];
