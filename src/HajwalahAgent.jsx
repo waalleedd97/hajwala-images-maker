@@ -472,9 +472,15 @@ ${rejections}
       addThought("🎨 بناء البرومبت بناءً على الأنماط المتعلمة...");
 
       const prompt = buildAgentPrompt();
+      addThought("📡 إرسال البرومبت إلى Gemini 3.1 Pro...");
+
+      const textController = new AbortController();
+      const textTimeout = setTimeout(() => textController.abort(), 60000);
+
       const textResponse = await fetch(TEXT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: textController.signal,
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
@@ -485,8 +491,13 @@ ${rejections}
         }),
       });
 
+      clearTimeout(textTimeout);
+
       if (!textResponse.ok) {
-        throw new Error(`Text API Error: ${textResponse.status}`);
+        const errBody = await textResponse.text().catch(() => "");
+        let detail = "";
+        try { detail = JSON.parse(errBody)?.error?.message || ""; } catch {}
+        throw new Error(`Text API Error ${textResponse.status}: ${detail || "فشل توليد النص"}`);
       }
 
       const textData = await textResponse.json();
@@ -601,7 +612,11 @@ CRITICAL STYLE INSTRUCTION: I am providing ${Math.min(styleRefs.length, 3)} refe
       setTotalGenerated((p) => p + 1);
     } catch (err) {
       console.error("Generation error:", err);
-      setGenerateError(err.message || "حدث خطأ أثناء التوليد");
+      if (err.name === "AbortError") {
+        setGenerateError("انتهت مهلة الاتصال بالسيرفر (60 ثانية) — حاول مرة ثانية");
+      } else {
+        setGenerateError(err.message || "حدث خطأ أثناء التوليد");
+      }
     } finally {
       setIsGenerating(false);
       setShowResult(true);
