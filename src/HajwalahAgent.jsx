@@ -228,6 +228,96 @@ const extractJSON = (text) => {
 };
 
 // ============================================================
+// IndexedDB — Style Reference Image Storage
+// ============================================================
+const STYLE_REF_DB_NAME = "hajwalah-style-refs";
+const STYLE_REF_DB_VERSION = 1;
+const STYLE_REF_STORE = "images";
+
+const openStyleRefDB = () =>
+  new Promise((resolve, reject) => {
+    const req = indexedDB.open(STYLE_REF_DB_NAME, STYLE_REF_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STYLE_REF_STORE)) {
+        db.createObjectStore(STYLE_REF_STORE, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+const idbPut = async (record) => {
+  const db = await openStyleRefDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STYLE_REF_STORE, "readwrite");
+    tx.objectStore(STYLE_REF_STORE).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+};
+
+const idbDelete = async (id) => {
+  const db = await openStyleRefDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STYLE_REF_STORE, "readwrite");
+    tx.objectStore(STYLE_REF_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+};
+
+const idbGetAll = async () => {
+  const db = await openStyleRefDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STYLE_REF_STORE, "readonly");
+    const req = tx.objectStore(STYLE_REF_STORE).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+};
+
+// Canvas-based image resize for API-safe payloads
+const resizeImageToBase64 = (file, maxDim = 512) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      // Thumbnail for gallery
+      const thumbScale = 128 / Math.max(width, height);
+      const tw = Math.round(width * thumbScale);
+      const th = Math.round(height * thumbScale);
+      canvas.width = tw;
+      canvas.height = th;
+      ctx.drawImage(img, 0, 0, tw, th);
+      const thumbUrl = canvas.toDataURL("image/jpeg", 0.7);
+      resolve({
+        mimeType: "image/jpeg",
+        data: dataUrl.split(",")[1],
+        thumbnail: thumbUrl,
+      });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Failed to load image"));
+    };
+    img.src = url;
+  });
+
+// ============================================================
 // MAIN APP
 // ============================================================
 // localStorage helpers
@@ -292,6 +382,10 @@ export default function HajwalahAgent() {
   const [isAnalyzingStyle, setIsAnalyzingStyle] = useState(false);
   const [styleAnalysisResult, setStyleAnalysisResult] = useState(null);
 
+  // Style Reference Library state
+  const [styleRefs, setStyleRefs] = useState([]);
+  const [styleRefsLoading, setStyleRefsLoading] = useState(true);
+
   // Agent Memory System — persisted via localStorage
   const [agentMemory, setAgentMemory] = useState(saved?.agentMemory ?? DEFAULT_MEMORY);
 
@@ -310,6 +404,14 @@ export default function HajwalahAgent() {
       console.warn("Failed to persist state:", e);
     }
   }, [agentLevel, agentXP, totalGenerated, acceptedCount, rejectedCount, agentMemory]);
+
+  // Load style reference images from IndexedDB on mount
+  useEffect(() => {
+    idbGetAll()
+      .then((records) => setStyleRefs(records.sort((a, b) => a.addedAt - b.addedAt)))
+      .catch((err) => console.warn("Failed to load style refs:", err))
+      .finally(() => setStyleRefsLoading(false));
+  }, []);
 
   const buildAgentPrompt = () => {
     const postType = postTypes.find((p) => p.id === selectedPostType);
@@ -402,8 +504,33 @@ ${rejections}
       await new Promise((r) => setTimeout(r, 300));
       addThought("🖼️ إرسال لنموذج Nano Banana 2 لتوليد الصورة...");
 
-      const imagePromptText = content.imagePrompt
+      const hasStyleRefs = styleRefs.length > 0;
+      const baseImagePrompt = content.imagePrompt
         || `Hajwalah Corsa 2 racing game social media post, ${content.title}, dark background, neon purple lighting, drift smoke, Arabic gaming aesthetic, dramatic, high quality`;
+
+      const imagePromptText = hasStyleRefs
+        ? `${baseImagePrompt}
+
+CRITICAL STYLE INSTRUCTION: I am providing ${Math.min(styleRefs.length, 3)} reference screenshots from the actual game "Hajwalah Corsa 2". You MUST analyze these reference images and replicate their exact visual style:
+- Match the Unity 3D mid-fidelity rendering style visible in the references
+- Replicate the same lighting quality, texture resolution, and material shading
+- Use the same color grading and atmospheric effects shown in the reference screenshots
+- Match the KSA (Saudi Arabia) environmental aesthetics: desert terrain, urban Saudi streets, drift arenas
+- DO NOT generate photorealistic images. The output must look like it belongs in the same game as the reference screenshots
+- Use visual inference from the provided images for 100% stylistic match
+- Pay attention to: car models style, smoke/particle effects, road surfaces, sky rendering, UI overlay style`
+        : baseImagePrompt;
+
+      // Build multimodal parts: reference images (up to 3) + text prompt
+      const imageParts = [];
+      if (hasStyleRefs) {
+        const refsToSend = styleRefs.slice(-3);
+        for (const ref of refsToSend) {
+          imageParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
+        }
+        addThought(`🎮 إرفاق ${refsToSend.length} صور مرجعية لستايل اللعبة...`);
+      }
+      imageParts.push({ text: imagePromptText });
 
       const imageController = new AbortController();
       const imageTimeout = setTimeout(() => imageController.abort(), 60000);
@@ -414,7 +541,7 @@ ${rejections}
           headers: { "Content-Type": "application/json" },
           signal: imageController.signal,
           body: JSON.stringify({
-            contents: [{ parts: [{ text: imagePromptText }] }],
+            contents: [{ parts: imageParts }],
             generationConfig: {
               responseModalities: ["TEXT", "IMAGE"],
               imageConfig: {
@@ -533,6 +660,39 @@ ${rejections}
       ...prev,
       rejectionReasons: prev.rejectionReasons.filter((_, i) => i !== index),
     }));
+  };
+
+  // --- Style Reference Library handlers ---
+
+  const handleAddStyleRef = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    for (const file of files) {
+      try {
+        const { mimeType, data, thumbnail } = await resizeImageToBase64(file, 512);
+        const record = {
+          id: crypto.randomUUID(),
+          mimeType,
+          data,
+          thumbnail,
+          addedAt: Date.now(),
+        };
+        await idbPut(record);
+        setStyleRefs((prev) => [...prev, record]);
+      } catch (err) {
+        console.warn("Failed to add style ref:", err);
+      }
+    }
+    e.target.value = "";
+  };
+
+  const handleDeleteStyleRef = async (id) => {
+    try {
+      await idbDelete(id);
+      setStyleRefs((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      console.warn("Failed to delete style ref:", err);
+    }
   };
 
   // --- Image upload + Gemini style analysis ---
@@ -1104,6 +1264,26 @@ ${rejections}
               )}
             </div>
           </div>
+
+          {/* Style Reference Indicator */}
+          {styleRefs.length > 0 && (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 16px",
+              background: `${PURPLE[900]}30`,
+              border: `1px solid ${PURPLE[700]}40`,
+              borderRadius: 12,
+              marginBottom: 12,
+              direction: "rtl",
+            }}>
+              <span style={{ fontSize: 18 }}>🎮</span>
+              <span style={{ fontSize: 14, color: PURPLE[300], fontFamily: "'Tajawal', sans-serif" }}>
+                {styleRefs.length} صور مرجعية من اللعبة سيتم إرسالها مع البرومبت
+              </span>
+            </div>
+          )}
 
           {/* Generate Button */}
           <button
@@ -1968,6 +2148,178 @@ ${rejections}
             fontFamily: "'Tajawal', sans-serif",
           }}>
             ❌ {styleAnalysisResult.error}
+          </div>
+        )}
+      </div>
+
+      {/* Style Reference Library */}
+      <div style={{
+        background: "white",
+        borderRadius: 24,
+        padding: 28,
+        marginBottom: 20,
+        border: `1px solid ${PURPLE[100]}`,
+        boxShadow: "0 4px 20px rgba(147,51,234,0.06)",
+      }}>
+        <h3 style={{
+          fontSize: 18,
+          fontWeight: 700,
+          color: PURPLE[800],
+          marginBottom: 8,
+          fontFamily: "'Tajawal', sans-serif",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <span>🎮</span> مكتبة صور اللعبة المرجعية
+        </h3>
+        <p style={{
+          fontSize: 13,
+          color: "#64748b",
+          fontFamily: "'Tajawal', sans-serif",
+          marginBottom: 16,
+        }}>
+          ارفع سكرينشوتات من اللعبة — الوكيل يستخدمها كمرجع ستايل لما يولّد الصور
+        </p>
+
+        {/* Counter Badge */}
+        <div style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          background: styleRefs.length > 0 ? "#ecfdf5" : PURPLE[50],
+          color: styleRefs.length > 0 ? "#059669" : PURPLE[600],
+          padding: "6px 14px",
+          borderRadius: 10,
+          fontSize: 13,
+          fontWeight: 700,
+          fontFamily: "'Tajawal', sans-serif",
+          marginBottom: 16,
+          border: `1px solid ${styleRefs.length > 0 ? "#bbf7d0" : PURPLE[100]}`,
+        }}>
+          {styleRefsLoading
+            ? "⏳ جاري التحميل..."
+            : `📷 ${styleRefs.length} صورة مرجعية محفوظة`
+          }
+        </div>
+
+        {/* Gallery Grid */}
+        {styleRefs.length > 0 && (
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+            gap: 12,
+            marginBottom: 16,
+          }}>
+            {styleRefs.map((ref) => (
+              <div key={ref.id} style={{
+                position: "relative",
+                borderRadius: 12,
+                overflow: "hidden",
+                border: `2px solid ${PURPLE[100]}`,
+                aspectRatio: "1",
+                background: PURPLE[50],
+              }}>
+                <img
+                  src={ref.thumbnail}
+                  alt="مرجع ستايل"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                  }}
+                />
+                <button
+                  onClick={() => handleDeleteStyleRef(ref.id)}
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    left: 6,
+                    width: 24,
+                    height: 24,
+                    borderRadius: 8,
+                    background: "rgba(220,38,38,0.85)",
+                    color: "white",
+                    border: "none",
+                    fontSize: 14,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    lineHeight: 1,
+                    backdropFilter: "blur(4px)",
+                    transition: "background 0.2s",
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "rgba(220,38,38,1)"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "rgba(220,38,38,0.85)"}
+                  title="حذف الصورة"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Upload Area */}
+        <label style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 24,
+          borderRadius: 16,
+          border: `2px dashed ${PURPLE[200]}`,
+          background: PURPLE[50],
+          cursor: "pointer",
+          transition: "all 0.2s",
+        }}>
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleAddStyleRef}
+            style={{ display: "none" }}
+          />
+          <span style={{ fontSize: 32, marginBottom: 6 }}>📤</span>
+          <span style={{
+            fontSize: 14,
+            color: PURPLE[600],
+            fontWeight: 600,
+            fontFamily: "'Tajawal', sans-serif",
+          }}>
+            اضغط لرفع سكرينشوتات من اللعبة
+          </span>
+          <span style={{
+            fontSize: 12,
+            color: "#94a3b8",
+            fontFamily: "'Tajawal', sans-serif",
+            marginTop: 4,
+          }}>
+            PNG, JPG, WEBP — يمكنك رفع عدة صور دفعة واحدة
+          </span>
+        </label>
+
+        {styleRefs.length > 0 && styleRefs.length < 3 && (
+          <div style={{
+            marginTop: 12,
+            fontSize: 12,
+            color: "#94a3b8",
+            fontFamily: "'Tajawal', sans-serif",
+            textAlign: "center",
+          }}>
+            💡 ارفع {3 - styleRefs.length} صور إضافية — الوكيل يرسل أفضل ٣ مراجع مع كل توليد
+          </div>
+        )}
+        {styleRefs.length >= 3 && (
+          <div style={{
+            marginTop: 12,
+            fontSize: 12,
+            color: "#059669",
+            fontFamily: "'Tajawal', sans-serif",
+            textAlign: "center",
+          }}>
+            ✅ جاهز — الوكيل بيرسل ٣ صور مرجعية مع كل توليد لمطابقة ستايل اللعبة
           </div>
         )}
       </div>
