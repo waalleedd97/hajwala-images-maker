@@ -370,6 +370,7 @@ export default function HajwalahAgent() {
   const [generatedContent, setGeneratedContent] = useState(null);
   const [generatedImage, setGeneratedImage] = useState(null);
   const [generateError, setGenerateError] = useState(null);
+  const [imageError, setImageError] = useState(null);
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -456,6 +457,7 @@ ${rejections}
     setGeneratedContent(null);
     setGeneratedImage(null);
     setGenerateError(null);
+    setImageError(null);
 
     const addThought = (t) => setAgentThinking((prev) => [...prev, t]);
 
@@ -544,9 +546,6 @@ CRITICAL STYLE INSTRUCTION: I am providing ${Math.min(styleRefs.length, 3)} refe
             contents: [{ parts: imageParts }],
             generationConfig: {
               responseModalities: ["TEXT", "IMAGE"],
-              imageConfig: {
-                aspectRatio: "1:1",
-              },
             },
           }),
         });
@@ -555,27 +554,44 @@ CRITICAL STYLE INSTRUCTION: I am providing ${Math.min(styleRefs.length, 3)} refe
 
         if (imageResponse.ok) {
           const imageData = await imageResponse.json();
-          const parts = imageData.candidates?.[0]?.content?.parts || [];
-          const imagePart = parts.find((p) => p.inlineData);
-          if (imagePart) {
-            const { mimeType, data } = imagePart.inlineData;
-            setGeneratedImage(`data:${mimeType};base64,${data}`);
-            addThought("✅ تم توليد الصورة بنجاح!");
+          console.log("Image API response:", JSON.stringify(imageData).slice(0, 500));
+          const candidate = imageData.candidates?.[0];
+          // Check for safety/filter blocks
+          if (candidate?.finishReason && candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS") {
+            console.error("Image blocked:", candidate.finishReason);
+            setImageError(`Nano Banana 2: ${candidate.finishReason}`);
+            addThought(`⚠️ الصورة تم حجبها: ${candidate.finishReason}`);
           } else {
-            addThought("⚠️ الصورة لم تُولّد — سيتم عرض النص فقط");
+            const parts = candidate?.content?.parts || [];
+            const imagePart = parts.find((p) => p.inlineData);
+            if (imagePart) {
+              const { mimeType, data } = imagePart.inlineData;
+              setGeneratedImage(`data:${mimeType};base64,${data}`);
+              addThought("✅ تم توليد الصورة بنجاح!");
+            } else {
+              const textParts = parts.filter((p) => p.text).map((p) => p.text).join(" ");
+              console.error("No image in response. Parts:", JSON.stringify(parts).slice(0, 300));
+              setImageError(`Nano Banana 2 لم يُرجع صورة${textParts ? ": " + textParts.slice(0, 100) : ""}`);
+              addThought("⚠️ الصورة لم تُولّد — سيتم عرض النص فقط");
+            }
           }
         } else {
           const errBody = await imageResponse.text().catch(() => "");
           console.error("Image API error:", imageResponse.status, errBody);
+          let detail = "";
+          try { detail = JSON.parse(errBody)?.error?.message || ""; } catch {}
+          setImageError(`خطأ ${imageResponse.status}: ${detail || "فشل توليد الصورة"}`);
           addThought(`⚠️ خطأ في توليد الصورة (${imageResponse.status}) — سيتم عرض النص فقط`);
         }
       } catch (imgErr) {
         clearTimeout(imageTimeout);
         if (imgErr.name === "AbortError") {
           console.error("Image generation timed out after 60s");
+          setImageError("انتهت مهلة توليد الصورة (60 ثانية)");
           addThought("⚠️ انتهت مهلة توليد الصورة — سيتم عرض النص فقط");
         } else {
           console.error("Image generation error:", imgErr);
+          setImageError(imgErr.message || "خطأ غير متوقع في توليد الصورة");
           addThought("⚠️ خطأ في توليد الصورة — سيتم عرض النص فقط");
         }
       }
@@ -1445,6 +1461,42 @@ CRITICAL STYLE INSTRUCTION: I am providing ${Math.min(styleRefs.length, 3)} refe
                     backdropFilter: "blur(8px)",
                   }}>
                     Nano Banana 2 — Hajwalah Agent v{agentLevel}.{agentMemory.totalInteractions}
+                  </div>
+                </div>
+              )}
+
+              {/* Image Generation Error */}
+              {!generatedImage && imageError && (
+                <div style={{
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  borderRadius: 16,
+                  padding: 20,
+                  marginBottom: 16,
+                  textAlign: "center",
+                  direction: "rtl",
+                }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>🖼️❌</div>
+                  <div style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "#991b1b",
+                    marginBottom: 6,
+                    fontFamily: "'Tajawal', sans-serif",
+                  }}>
+                    فشل توليد الصورة من Nano Banana 2
+                  </div>
+                  <div style={{
+                    fontSize: 12,
+                    color: "#dc2626",
+                    fontFamily: "monospace",
+                    direction: "ltr",
+                    background: "#fff5f5",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    wordBreak: "break-word",
+                  }}>
+                    {imageError}
                   </div>
                 </div>
               )}
