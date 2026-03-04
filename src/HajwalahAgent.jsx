@@ -24,6 +24,140 @@ const PURPLE = {
   900: "#581c87",
 };
 
+const POST_TYPE_IDS = ["update", "event", "car", "tip", "season", "collab"];
+const STYLE_OPTIONS = {
+  compositions: ["dynamic-diagonal", "centered", "rule-of-thirds"],
+  textPlacements: ["bottom-right", "center", "top-right"],
+  arabicFonts: ["bold-kufi", "naskh", "ruqaa"],
+};
+const COLOR_CANDIDATES = ["#7e22ce", "#1a1a2e", "#ff6b35", "#000000", "#ffffff", "#e74c3c", "#3498db"];
+
+const COLOR_NAMES_AR = {
+  "#7e22ce": "بنفسجي",
+  "#1a1a2e": "أسود غامق",
+  "#ff6b35": "برتقالي",
+  "#000000": "أسود",
+  "#ffffff": "أبيض",
+  "#e74c3c": "أحمر",
+  "#3498db": "أزرق",
+};
+const COMPOSITION_LABELS_AR = {
+  "dynamic-diagonal": "قطري ديناميكي",
+  centered: "مركزي",
+  "rule-of-thirds": "قاعدة الأثلاث",
+};
+const FONT_LABELS_AR = {
+  "bold-kufi": "كوفي عريض",
+  naskh: "نسخ",
+  ruqaa: "رقعة",
+};
+const PLACEMENT_LABELS_AR = {
+  "bottom-right": "أسفل-يمين",
+  center: "وسط",
+  "top-right": "أعلى-يمين",
+};
+const REJECTION_REASON_LABELS_AR = {
+  style: "الستايل مو حلو",
+  text: "النص العربي فيه مشكلة",
+  composition: "التكوين ضعيف",
+  colors: "الألوان مو مناسبة",
+  vibe: "الفايب مو هجولة",
+  quality: "الجودة ضعيفة",
+  general: "النتيجة العامة غير مناسبة",
+};
+
+const clamp01 = (n) => Math.min(1, Math.max(0, n));
+const roundScore = (n) => Number(clamp01(n).toFixed(3));
+
+const createScoreNode = (initialScore = 0.5) => ({
+  score: roundScore(initialScore),
+  uses: 0,
+  accepts: 0,
+  rejects: 0,
+});
+
+const updateScoreNode = (node, accepted) => {
+  const uses = (node?.uses || 0) + 1;
+  const accepts = (node?.accepts || 0) + (accepted ? 1 : 0);
+  const rejects = (node?.rejects || 0) + (accepted ? 0 : 1);
+  // Smoothed acceptance estimate to avoid overreacting on tiny sample sizes.
+  const score = roundScore((accepts + 1) / (uses + 2));
+  return { score, uses, accepts, rejects };
+};
+
+const mergeScoreMap = (defaults = {}, incoming = {}) => {
+  const merged = {};
+  const keys = new Set([...Object.keys(defaults), ...Object.keys(incoming || {})]);
+  keys.forEach((key) => {
+    const base = defaults[key] || createScoreNode(0.5);
+    const value = incoming?.[key] || {};
+    merged[key] = {
+      score: roundScore(typeof value.score === "number" ? value.score : base.score),
+      uses: Number.isFinite(value.uses) ? value.uses : base.uses,
+      accepts: Number.isFinite(value.accepts) ? value.accepts : base.accepts,
+      rejects: Number.isFinite(value.rejects) ? value.rejects : base.rejects,
+    };
+  });
+  return merged;
+};
+
+const pickBestKeyFromScores = (scoreMap = {}, fallback) => {
+  const sorted = Object.entries(scoreMap).sort((a, b) => (b[1]?.score || 0) - (a[1]?.score || 0));
+  return sorted[0]?.[0] || fallback;
+};
+
+const pickTopColorsFromScores = (colorScores = {}, fallback = [], count = 3) => {
+  const ranked = Object.entries(colorScores)
+    .sort((a, b) => (b[1]?.score || 0) - (a[1]?.score || 0))
+    .map(([color]) => color);
+  const merged = [...ranked, ...fallback].filter(Boolean);
+  return Array.from(new Set(merged)).slice(0, count);
+};
+
+const getTopScoreEntries = (scoreMap = {}, limit = 3) =>
+  Object.entries(scoreMap)
+    .sort((a, b) => (b[1]?.score || 0) - (a[1]?.score || 0))
+    .slice(0, limit);
+
+const buildDefaultScoreMap = (keys, seed = {}) =>
+  keys.reduce((acc, key) => {
+    acc[key] = createScoreNode(seed[key] ?? 0.5);
+    return acc;
+  }, {});
+
+const DEFAULT_SCORING_ENGINE = {
+  version: 1,
+  totalFeedback: 0,
+  acceptedFeedback: 0,
+  acceptanceRate: 0,
+  colorScores: buildDefaultScoreMap(COLOR_CANDIDATES, {
+    "#7e22ce": 0.68,
+    "#1a1a2e": 0.66,
+    "#ff6b35": 0.64,
+  }),
+  compositionScores: buildDefaultScoreMap(STYLE_OPTIONS.compositions, {
+    "dynamic-diagonal": 0.7,
+    centered: 0.55,
+    "rule-of-thirds": 0.6,
+  }),
+  textPlacementScores: buildDefaultScoreMap(STYLE_OPTIONS.textPlacements, {
+    "bottom-right": 0.65,
+    center: 0.55,
+    "top-right": 0.58,
+  }),
+  arabicFontScores: buildDefaultScoreMap(STYLE_OPTIONS.arabicFonts, {
+    "bold-kufi": 0.7,
+    naskh: 0.55,
+    ruqaa: 0.52,
+  }),
+  textPolicyScores: buildDefaultScoreMap(["no-text", "exact-text"], {
+    "no-text": 0.62,
+    "exact-text": 0.58,
+  }),
+  postTypeScores: buildDefaultScoreMap(POST_TYPE_IDS),
+  patternScores: {},
+};
+
 // 3D Icon Components
 const Icon3D = ({ type, size = 48 }) => {
   const icons = {
@@ -167,21 +301,23 @@ const Icon3D = ({ type, size = 48 }) => {
   return icons[type] || null;
 };
 
+const PARTICLE_PALETTE = [PURPLE[200], PURPLE[300], PURPLE[400], "#f9a8d4", "#fbbf24", "#34d399"];
+const STATIC_PARTICLES = Array.from({ length: 20 }, (_, i) => ({
+  id: i,
+  left: `${Math.random() * 100}%`,
+  top: `${Math.random() * 100}%`,
+  size: 4 + Math.random() * 8,
+  delay: Math.random() * 5,
+  duration: 3 + Math.random() * 4,
+  color: PARTICLE_PALETTE[Math.floor(Math.random() * PARTICLE_PALETTE.length)],
+}));
+
 // Animated background particles
 const ParticleField = () => {
-  const particles = Array.from({ length: 20 }, (_, i) => ({
-    id: i,
-    left: `${Math.random() * 100}%`,
-    top: `${Math.random() * 100}%`,
-    size: 4 + Math.random() * 8,
-    delay: Math.random() * 5,
-    duration: 3 + Math.random() * 4,
-    color: [PURPLE[200], PURPLE[300], PURPLE[400], "#f9a8d4", "#fbbf24", "#34d399"][Math.floor(Math.random() * 6)],
-  }));
 
   return (
     <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" }}>
-      {particles.map((p) => (
+      {STATIC_PARTICLES.map((p) => (
         <div
           key={p.id}
           style={{
@@ -351,6 +487,146 @@ const DEFAULT_MEMORY = {
   rejectionReasons: [],
   successfulPrompts: [],
   totalInteractions: 0,
+  scoringEngine: DEFAULT_SCORING_ENGINE,
+};
+
+const normalizeScoringEngine = (engine = {}) => {
+  const totalFeedback = Number.isFinite(engine.totalFeedback) ? engine.totalFeedback : 0;
+  const acceptedFeedback = Number.isFinite(engine.acceptedFeedback) ? engine.acceptedFeedback : 0;
+  const acceptanceRate = totalFeedback > 0
+    ? roundScore(acceptedFeedback / totalFeedback)
+    : roundScore(engine.acceptanceRate || 0);
+
+  return {
+    version: 1,
+    totalFeedback,
+    acceptedFeedback,
+    acceptanceRate,
+    colorScores: mergeScoreMap(DEFAULT_SCORING_ENGINE.colorScores, engine.colorScores),
+    compositionScores: mergeScoreMap(DEFAULT_SCORING_ENGINE.compositionScores, engine.compositionScores),
+    textPlacementScores: mergeScoreMap(DEFAULT_SCORING_ENGINE.textPlacementScores, engine.textPlacementScores),
+    arabicFontScores: mergeScoreMap(DEFAULT_SCORING_ENGINE.arabicFontScores, engine.arabicFontScores),
+    textPolicyScores: mergeScoreMap(DEFAULT_SCORING_ENGINE.textPolicyScores, engine.textPolicyScores),
+    postTypeScores: mergeScoreMap(DEFAULT_SCORING_ENGINE.postTypeScores, engine.postTypeScores),
+    patternScores: mergeScoreMap({}, engine.patternScores),
+  };
+};
+
+const deriveStyleProfileFromScoring = (scoringEngine, fallbackStyleProfile) => ({
+  ...fallbackStyleProfile,
+  preferredColors: pickTopColorsFromScores(
+    scoringEngine.colorScores,
+    fallbackStyleProfile.preferredColors || DEFAULT_MEMORY.styleProfile.preferredColors,
+    3,
+  ),
+  preferredComposition: pickBestKeyFromScores(
+    scoringEngine.compositionScores,
+    fallbackStyleProfile.preferredComposition || DEFAULT_MEMORY.styleProfile.preferredComposition,
+  ),
+  textPlacement: pickBestKeyFromScores(
+    scoringEngine.textPlacementScores,
+    fallbackStyleProfile.textPlacement || DEFAULT_MEMORY.styleProfile.textPlacement,
+  ),
+  arabicFont: pickBestKeyFromScores(
+    scoringEngine.arabicFontScores,
+    fallbackStyleProfile.arabicFont || DEFAULT_MEMORY.styleProfile.arabicFont,
+  ),
+});
+
+const normalizeAgentMemory = (memory) => {
+  const fallback = DEFAULT_MEMORY;
+  const incoming = memory || {};
+  const styleProfile = {
+    ...fallback.styleProfile,
+    ...(incoming.styleProfile || {}),
+    confidence: clamp01(incoming.styleProfile?.confidence ?? fallback.styleProfile.confidence),
+  };
+
+  const scoringEngine = normalizeScoringEngine(incoming.scoringEngine || fallback.scoringEngine);
+  const derivedStyle = deriveStyleProfileFromScoring(scoringEngine, styleProfile);
+
+  return {
+    ...fallback,
+    ...incoming,
+    styleProfile: {
+      ...derivedStyle,
+      confidence: styleProfile.confidence,
+    },
+    learnedPatterns: Array.isArray(incoming.learnedPatterns) ? incoming.learnedPatterns : fallback.learnedPatterns,
+    rejectionReasons: Array.isArray(incoming.rejectionReasons) ? incoming.rejectionReasons : fallback.rejectionReasons,
+    successfulPrompts: Array.isArray(incoming.successfulPrompts) ? incoming.successfulPrompts : fallback.successfulPrompts,
+    totalInteractions: Number.isFinite(incoming.totalInteractions) ? incoming.totalInteractions : fallback.totalInteractions,
+    scoringEngine,
+  };
+};
+
+const patchScoreMap = (scoreMap, key, accepted, times = 1) => {
+  if (!key) return scoreMap;
+  const next = { ...scoreMap };
+  const count = Math.max(1, times);
+  for (let i = 0; i < count; i++) {
+    next[key] = updateScoreNode(next[key] || createScoreNode(0.5), accepted);
+  }
+  return next;
+};
+
+const applyFeedbackToMemory = (memory, context, accepted, reason = "") => {
+  const normalized = normalizeAgentMemory(memory);
+  const scoring = normalizeScoringEngine(normalized.scoringEngine);
+
+  scoring.totalFeedback += 1;
+  if (accepted) scoring.acceptedFeedback += 1;
+  scoring.acceptanceRate = roundScore(
+    scoring.totalFeedback > 0 ? scoring.acceptedFeedback / scoring.totalFeedback : 0,
+  );
+
+  if (context) {
+    const sp = context.styleProfile || {};
+    scoring.compositionScores = patchScoreMap(scoring.compositionScores, sp.preferredComposition, accepted);
+    scoring.textPlacementScores = patchScoreMap(scoring.textPlacementScores, sp.textPlacement, accepted);
+    scoring.arabicFontScores = patchScoreMap(scoring.arabicFontScores, sp.arabicFont, accepted);
+    scoring.textPolicyScores = patchScoreMap(scoring.textPolicyScores, context.textPolicy, accepted);
+    scoring.postTypeScores = patchScoreMap(scoring.postTypeScores, context.postType, accepted);
+
+    (context.usedColors || []).forEach((color) => {
+      scoring.colorScores = patchScoreMap(scoring.colorScores, color, accepted);
+    });
+    (context.usedPatterns || []).forEach((pattern) => {
+      scoring.patternScores = patchScoreMap(scoring.patternScores, pattern, accepted);
+    });
+
+    // Optional extra penalties to accelerate learning from explicit rejection reasons.
+    if (!accepted) {
+      if (reason === "colors") {
+        (context.usedColors || []).forEach((color) => {
+          scoring.colorScores = patchScoreMap(scoring.colorScores, color, false);
+        });
+      }
+      if (reason === "composition") {
+        scoring.compositionScores = patchScoreMap(scoring.compositionScores, sp.preferredComposition, false);
+      }
+      if (reason === "text") {
+        scoring.textPolicyScores = patchScoreMap(scoring.textPolicyScores, context.textPolicy, false);
+        scoring.textPlacementScores = patchScoreMap(scoring.textPlacementScores, sp.textPlacement, false);
+        scoring.arabicFontScores = patchScoreMap(scoring.arabicFontScores, sp.arabicFont, false);
+      }
+      if (reason === "style" || reason === "vibe") {
+        (context.usedPatterns || []).forEach((pattern) => {
+          scoring.patternScores = patchScoreMap(scoring.patternScores, pattern, false);
+        });
+      }
+    }
+  }
+
+  const derivedStyle = deriveStyleProfileFromScoring(scoring, normalized.styleProfile);
+  return {
+    ...normalized,
+    styleProfile: {
+      ...derivedStyle,
+      confidence: normalized.styleProfile.confidence,
+    },
+    scoringEngine: scoring,
+  };
 };
 
 export default function HajwalahAgent() {
@@ -373,6 +649,7 @@ export default function HajwalahAgent() {
   const [generatedImage, setGeneratedImage] = useState(null);
   const [generateError, setGenerateError] = useState(null);
   const [imageError, setImageError] = useState(null);
+  const [lastGenerationContext, setLastGenerationContext] = useState(null);
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -399,7 +676,9 @@ export default function HajwalahAgent() {
   const [trainingToast, setTrainingToast] = useState("");
 
   // Agent Memory System — persisted via localStorage
-  const [agentMemory, setAgentMemory] = useState(saved?.agentMemory ?? DEFAULT_MEMORY);
+  const [agentMemory, setAgentMemory] = useState(
+    normalizeAgentMemory(saved?.agentMemory ?? DEFAULT_MEMORY),
+  );
 
   // Persist agent state to localStorage on every relevant change
   useEffect(() => {
@@ -443,26 +722,44 @@ export default function HajwalahAgent() {
     return null;
   };
 
-  const buildAgentPrompt = (userExplicitText) => {
+  const deriveGenerationStrategy = (userExplicitText) => {
+    const scoring = normalizeScoringEngine(agentMemory.scoringEngine);
+    const styleProfile = deriveStyleProfileFromScoring(scoring, agentMemory.styleProfile);
+    const patternScores = scoring.patternScores || {};
+
+    const selectedPatterns = (agentMemory.learnedPatterns || [])
+      .map((p) => {
+        const scoreSignal = patternScores[p.pattern]?.score ?? 0.5;
+        const effectiveWeight = roundScore((p.weight * 0.7) + (scoreSignal * 0.3));
+        return { ...p, effectiveWeight, scoreSignal };
+      })
+      .sort((a, b) => b.effectiveWeight - a.effectiveWeight)
+      .slice(0, 8);
+
+    return {
+      scoring,
+      styleProfile,
+      selectedPatterns,
+      textPolicy: userExplicitText ? "exact-text" : "no-text",
+    };
+  };
+
+  const buildAgentPrompt = (userExplicitText, strategy) => {
     const postType = postTypes.find((p) => p.id === selectedPostType);
-    const patterns = agentMemory.learnedPatterns.map((p) => {
+    const patterns = strategy.selectedPatterns.map((p) => {
       const sourceTag = p.source === "image-analysis" ? " [من صورة]" : p.source === "manual" ? " [يدوي]" : "";
-      return `- ${p.pattern} (وزن: ${Math.round(p.weight * 100)}%)${sourceTag}`;
+      return `- ${p.pattern} (أولوية: ${Math.round(p.effectiveWeight * 100)}% | أداء: ${Math.round(p.scoreSignal * 100)}%)${sourceTag}`;
     }).join("\n");
     const rejections = agentMemory.rejectionReasons.length > 0
-      ? agentMemory.rejectionReasons.map((r) => `- ${r.reason}`).join("\n")
+      ? agentMemory.rejectionReasons.slice(-12).map((r) => `- ${REJECTION_REASON_LABELS_AR[r.reason] || r.reason}`).join("\n")
       : "لا يوجد رفض سابق";
     const confidence = Math.round(agentMemory.styleProfile.confidence * 100);
 
-    const sp = agentMemory.styleProfile;
-    const colorNames = {
-      "#7e22ce": "بنفسجي", "#1a1a2e": "أسود غامق", "#ff6b35": "برتقالي",
-      "#000000": "أسود", "#ffffff": "أبيض", "#e74c3c": "أحمر", "#3498db": "أزرق",
-    };
-    const colorsAr = sp.preferredColors.map((c) => colorNames[c] || c).join("، ");
-    const compMap = { "dynamic-diagonal": "قطري ديناميكي", "centered": "مركزي", "rule-of-thirds": "قاعدة الأثلاث" };
-    const fontMap = { "bold-kufi": "كوفي عريض", "naskh": "نسخ", "ruqaa": "رقعة" };
-    const placementMap = { "bottom-right": "أسفل-يمين", "center": "وسط", "top-right": "أعلى-يمين" };
+    const sp = strategy.styleProfile;
+    const colorsAr = sp.preferredColors.map((c) => COLOR_NAMES_AR[c] || c).join("، ");
+    const postTypeScore = strategy.scoring.postTypeScores[selectedPostType]?.score ?? 0.5;
+    const textPolicyScore = strategy.scoring.textPolicyScores[strategy.textPolicy]?.score ?? 0.5;
+    const acceptanceRate = Math.round((strategy.scoring.acceptanceRate || 0) * 100);
 
     const textInstruction = userExplicitText
       ? `   - ✅ المستخدم طلب نص على الصورة — اذكر في الوصف إن الصورة تحتوي على النص المطلوب: "${userExplicitText}"`
@@ -475,9 +772,9 @@ ${promptInput ? `توجيه إضافي من المستخدم: ${promptInput}` : 
 
 ===== ملف الستايل المتعلّم (أولوية قصوى) =====
 الألوان المفضلة: ${colorsAr} (${sp.preferredColors.join(", ")})
-التكوين: ${compMap[sp.preferredComposition] || sp.preferredComposition}
-الخط العربي: ${fontMap[sp.arabicFont] || sp.arabicFont}
-موقع النص: ${placementMap[sp.textPlacement] || sp.textPlacement}
+التكوين: ${COMPOSITION_LABELS_AR[sp.preferredComposition] || sp.preferredComposition}
+الخط العربي: ${FONT_LABELS_AR[sp.arabicFont] || sp.arabicFont}
+موقع النص: ${PLACEMENT_LABELS_AR[sp.textPlacement] || sp.textPlacement}
 ===============================================
 
 الأنماط المتعلمة من تفاعلات المستخدم:
@@ -488,6 +785,12 @@ ${rejections}
 
 مستوى ثقة الوكيل: ${confidence}%
 عدد التفاعلات السابقة: ${agentMemory.totalInteractions}
+
+===== مؤشرات محرك القياس (Scoring Engine) =====
+- نسبة القبول الكلية: ${acceptanceRate}% من ${strategy.scoring.totalFeedback} تقييم
+- أداء نوع البوست "${postType?.label || selectedPostType || "عام"}": ${Math.round(postTypeScore * 100)}%
+- أداء سياسة النص (${strategy.textPolicy}): ${Math.round(textPolicyScore * 100)}%
+===============================================
 
 ===== مرحلة التفكير (مطلوبة قبل الكتابة) =====
 قبل ما تكتب البوست، فكّر وأجب على هذي الأسئلة:
@@ -522,6 +825,7 @@ ${textInstruction}
     setGeneratedImage(null);
     setGenerateError(null);
     setImageError(null);
+    setLastGenerationContext(null);
 
     const addThought = (t) => setAgentThinking((prev) => [...prev, t]);
 
@@ -540,7 +844,8 @@ ${textInstruction}
         addThought(`✍️ تم كشف نص مطلوب: "${userExplicitText}"`);
       }
 
-      const prompt = buildAgentPrompt(userExplicitText);
+      const generationStrategy = deriveGenerationStrategy(userExplicitText);
+      const prompt = buildAgentPrompt(userExplicitText, generationStrategy);
       addThought("🤔 الوكيل يفكّر ويحلل قبل الكتابة...");
       addThought("📡 إرسال البرومبت إلى Gemini 3.1 Flash Lite...");
 
@@ -566,7 +871,8 @@ ${textInstruction}
       if (!textResponse.ok) {
         const errBody = await textResponse.text().catch(() => "");
         let detail = "";
-        try { detail = JSON.parse(errBody)?.error?.message || ""; } catch {}
+        try { detail = JSON.parse(errBody)?.error?.message || ""; }
+        catch (parseErr) { console.warn("Text API error body parse failed:", parseErr); }
         throw new Error(`Text API Error ${textResponse.status}: ${detail || "فشل توليد النص"}`);
       }
 
@@ -600,16 +906,15 @@ ${textInstruction}
       addThought("🖼️ إرسال لنموذج Nano Banana 2 لتوليد الصورة...");
 
       const hasStyleRefs = styleRefs.length > 0;
-      const sp = agentMemory.styleProfile;
+      const sp = generationStrategy.styleProfile;
       const postTitle = content.title || "";
 
       const baseImagePrompt = content.imagePrompt
         || `Hajwalah Corsa 2 racing game, ${postTitle}, dark background, neon purple lighting, drift smoke, dramatic, high quality`;
 
-      // Collect learned style patterns (non-prohibition)
-      const allPatterns = agentMemory.learnedPatterns || [];
-      const stylePatterns = allPatterns
-        .filter((p) => p.weight >= 0.7)
+      // Collect highest-ranked learned patterns from scoring engine
+      const stylePatterns = generationStrategy.selectedPatterns
+        .slice(0, 6)
         .map((p) => `- ${p.pattern}`)
         .join("\n");
 
@@ -679,6 +984,22 @@ ${stylePatterns}
 
 ${textReminder}`;
 
+      const usedPatternNames = generationStrategy.selectedPatterns
+        .slice(0, 6)
+        .map((p) => p.pattern);
+
+      setLastGenerationContext({
+        postType: selectedPostType,
+        textPolicy: generationStrategy.textPolicy,
+        styleProfile: sp,
+        usedColors: sp.preferredColors,
+        usedPatterns: usedPatternNames,
+        hasStyleRefs,
+        explicitText: Boolean(userExplicitText),
+        finalImagePrompt: imagePromptText,
+        timestamp: Date.now(),
+      });
+
       // Build multimodal parts: reference images (up to 3) + text prompt
       const imageParts = [];
       if (hasStyleRefs) {
@@ -739,7 +1060,8 @@ ${textReminder}`;
           const errBody = await imageResponse.text().catch(() => "");
           console.error("Image API error:", imageResponse.status, errBody);
           let detail = "";
-          try { detail = JSON.parse(errBody)?.error?.message || ""; } catch {}
+          try { detail = JSON.parse(errBody)?.error?.message || ""; }
+          catch (parseErr) { console.warn("Image API error body parse failed:", parseErr); }
           setImageError(`خطأ ${imageResponse.status}: ${detail || "فشل توليد الصورة"}`);
           addThought(`⚠️ خطأ في توليد الصورة (${imageResponse.status}) — سيتم عرض النص فقط`);
         }
@@ -782,20 +1104,26 @@ ${textReminder}`;
         }
         return newXP;
       });
-      setAgentMemory((prev) => ({
-        ...prev,
-        successfulPrompts: [...prev.successfulPrompts, { type: selectedPostType, time: Date.now() }],
-        styleProfile: { ...prev.styleProfile, confidence: Math.min(prev.styleProfile.confidence + 0.05, 1) },
-        totalInteractions: prev.totalInteractions + 1,
-      }));
+      setAgentMemory((prev) => {
+        const withInteraction = {
+          ...prev,
+          successfulPrompts: [...prev.successfulPrompts, { type: selectedPostType, time: Date.now() }],
+          styleProfile: { ...prev.styleProfile, confidence: Math.min(prev.styleProfile.confidence + 0.05, 1) },
+          totalInteractions: prev.totalInteractions + 1,
+        };
+        return applyFeedbackToMemory(withInteraction, lastGenerationContext, true, "");
+      });
     } else {
       setRejectedCount((p) => p + 1);
       setAgentXP((p) => Math.min(p + 10, 99));
-      setAgentMemory((prev) => ({
-        ...prev,
-        rejectionReasons: [...prev.rejectionReasons, { reason, type: selectedPostType, time: Date.now() }],
-        totalInteractions: prev.totalInteractions + 1,
-      }));
+      setAgentMemory((prev) => {
+        const withInteraction = {
+          ...prev,
+          rejectionReasons: [...prev.rejectionReasons, { reason, type: selectedPostType, time: Date.now() }],
+          totalInteractions: prev.totalInteractions + 1,
+        };
+        return applyFeedbackToMemory(withInteraction, lastGenerationContext, false, reason);
+      });
     }
   };
 
@@ -901,9 +1229,15 @@ ${textReminder}`;
     setTrainingToast("");
     setTrainingImages(trainingVariations.map((v) => ({ image: null, prompt: "", label: v.label, status: "loading" })));
 
-    const sp = agentMemory.styleProfile;
+    const scoring = normalizeScoringEngine(agentMemory.scoringEngine);
+    const sp = deriveStyleProfileFromScoring(scoring, agentMemory.styleProfile);
     const stylePatterns = (agentMemory.learnedPatterns || [])
-      .filter((p) => p.weight >= 0.7)
+      .map((p) => {
+        const signal = scoring.patternScores[p.pattern]?.score ?? 0.5;
+        return { pattern: p.pattern, effective: (p.weight * 0.7) + (signal * 0.3) };
+      })
+      .sort((a, b) => b.effective - a.effective)
+      .slice(0, 6)
       .map((p) => p.pattern)
       .join(", ");
 
@@ -922,7 +1256,7 @@ ${textReminder}`;
       }
     }
 
-    const promises = trainingVariations.map(async (variation, i) => {
+    const promises = trainingVariations.map(async (variation) => {
       const fullPrompt = `${textRuleBlock}\n\n${variation.prefix} ${basePrompt}`;
       const parts = [...refParts, { text: fullPrompt }];
 
@@ -1457,7 +1791,7 @@ ${textReminder}`;
   const renderGenerate = () => (
     <div style={{ animation: "fadeUp 0.6s ease", maxWidth: 800, margin: "0 auto", padding: "40px 20px" }}>
       <button
-        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setTrainingMode(false); setTrainingImages([]); setTrainingLiked(null); }}
+        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setLastGenerationContext(null); setTrainingMode(false); setTrainingImages([]); setTrainingLiked(null); }}
         style={{
           background: "none",
           border: "none",
@@ -2005,7 +2339,7 @@ ${textReminder}`;
                 {generateError}
               </p>
               <button
-                onClick={() => { setShowResult(false); setGenerateError(null); }}
+                onClick={() => { setShowResult(false); setGenerateError(null); setLastGenerationContext(null); }}
                 style={{
                   background: `linear-gradient(135deg, ${PURPLE[600]}, ${PURPLE[800]})`,
                   color: "white",
@@ -2184,7 +2518,7 @@ ${textReminder}`;
               </div>
 
               {/* Image Prompt Card */}
-              {generatedContent.imagePrompt && (
+              {(lastGenerationContext?.finalImagePrompt || generatedContent.imagePrompt) && (
                 <div style={{
                   marginTop: 16,
                   background: PURPLE[50],
@@ -2199,7 +2533,7 @@ ${textReminder}`;
                     marginBottom: 8,
                     fontFamily: "'Tajawal', sans-serif",
                   }}>
-                    🎨 البرومبت المستخدم للصورة (Nano Banana 2):
+                    🎨 البرومبت النهائي المُرسل لنموذج الصورة:
                   </div>
                   <div style={{
                     fontSize: 13,
@@ -2213,7 +2547,7 @@ ${textReminder}`;
                     borderRadius: 10,
                     border: `1px solid ${PURPLE[100]}`,
                   }}>
-                    {generatedContent.imagePrompt}
+                    {lastGenerationContext?.finalImagePrompt || generatedContent.imagePrompt}
                   </div>
                 </div>
               )}
@@ -2346,6 +2680,7 @@ ${textReminder}`;
                     setGeneratedContent(null);
                     setGeneratedImage(null);
                     setGenerateError(null);
+                    setLastGenerationContext(null);
                   }}
                   style={{
                     background: `linear-gradient(135deg, ${PURPLE[600]}, ${PURPLE[800]})`,
@@ -2385,7 +2720,16 @@ ${textReminder}`;
     </div>
   );
 
-  const renderMemory = () => (
+  const renderMemory = () => {
+    const scoring = normalizeScoringEngine(agentMemory.scoringEngine);
+    const topComposition = getTopScoreEntries(scoring.compositionScores, 1)[0];
+    const topFont = getTopScoreEntries(scoring.arabicFontScores, 1)[0];
+    const topTextPlacement = getTopScoreEntries(scoring.textPlacementScores, 1)[0];
+    const topColors = getTopScoreEntries(scoring.colorScores, 3);
+    const totalFeedback = scoring.totalFeedback || 0;
+    const acceptanceRate = Math.round((scoring.acceptanceRate || 0) * 100);
+
+    return (
     <div style={{ animation: "fadeUp 0.6s ease", maxWidth: 800, margin: "0 auto", padding: "40px 20px" }}>
       <button
         onClick={() => setCurrentPage("home")}
@@ -2464,20 +2808,127 @@ ${textReminder}`;
           <div style={{ background: PURPLE[50], borderRadius: 16, padding: 16 }}>
             <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>التكوين</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
-              قطري ديناميكي
+              {COMPOSITION_LABELS_AR[agentMemory.styleProfile.preferredComposition] || agentMemory.styleProfile.preferredComposition}
             </div>
           </div>
           <div style={{ background: PURPLE[50], borderRadius: 16, padding: 16 }}>
             <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>موقع النص</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
-              أسفل-يمين
+              {PLACEMENT_LABELS_AR[agentMemory.styleProfile.textPlacement] || agentMemory.styleProfile.textPlacement}
             </div>
           </div>
           <div style={{ background: PURPLE[50], borderRadius: 16, padding: 16 }}>
             <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>الخط العربي</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
-              كوفي عريض
+              {FONT_LABELS_AR[agentMemory.styleProfile.arabicFont] || agentMemory.styleProfile.arabicFont}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Scoring Engine Metrics */}
+      <div style={{
+        background: "white",
+        borderRadius: 24,
+        padding: 28,
+        marginBottom: 20,
+        border: `1px solid ${PURPLE[200]}`,
+        boxShadow: "0 4px 20px rgba(147,51,234,0.06)",
+      }}>
+        <h3 style={{
+          fontSize: 18,
+          fontWeight: 700,
+          color: PURPLE[800],
+          marginBottom: 14,
+          fontFamily: "'Tajawal', sans-serif",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <span>📈</span> Scoring Engine
+        </h3>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <span style={{
+            background: PURPLE[50],
+            color: PURPLE[700],
+            border: `1px solid ${PURPLE[100]}`,
+            padding: "6px 12px",
+            borderRadius: 10,
+            fontSize: 13,
+            fontFamily: "'Tajawal', sans-serif",
+          }}>
+            التقييمات: {totalFeedback}
+          </span>
+          <span style={{
+            background: "#ecfdf5",
+            color: "#047857",
+            border: "1px solid #bbf7d0",
+            padding: "6px 12px",
+            borderRadius: 10,
+            fontSize: 13,
+            fontFamily: "'Tajawal', sans-serif",
+          }}>
+            نسبة القبول: {acceptanceRate}%
+          </span>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
+          <div style={{ background: PURPLE[50], borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل تكوين</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+              {COMPOSITION_LABELS_AR[topComposition?.[0]] || topComposition?.[0] || "—"}
+            </div>
+            <div style={{ fontSize: 12, color: PURPLE[500], fontFamily: "monospace" }}>
+              {Math.round(((topComposition?.[1]?.score || 0) * 100))}%
+            </div>
+          </div>
+          <div style={{ background: PURPLE[50], borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل خط</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+              {FONT_LABELS_AR[topFont?.[0]] || topFont?.[0] || "—"}
+            </div>
+            <div style={{ fontSize: 12, color: PURPLE[500], fontFamily: "monospace" }}>
+              {Math.round(((topFont?.[1]?.score || 0) * 100))}%
+            </div>
+          </div>
+          <div style={{ background: PURPLE[50], borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل موقع نص</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+              {PLACEMENT_LABELS_AR[topTextPlacement?.[0]] || topTextPlacement?.[0] || "—"}
+            </div>
+            <div style={{ fontSize: 12, color: PURPLE[500], fontFamily: "monospace" }}>
+              {Math.round(((topTextPlacement?.[1]?.score || 0) * 100))}%
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: PURPLE[50], borderRadius: 12, padding: 12 }}>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8, fontFamily: "'Tajawal', sans-serif" }}>أفضل الألوان أداءً</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {topColors.map(([color, stats]) => (
+              <span key={color} style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: "white",
+                border: `1px solid ${PURPLE[100]}`,
+                borderRadius: 10,
+                padding: "5px 9px",
+                fontSize: 12,
+                color: PURPLE[700],
+                fontFamily: "monospace",
+              }}>
+                <span style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: 4,
+                  background: color,
+                  border: "1px solid rgba(0,0,0,0.15)",
+                }} />
+                {Math.round((stats.score || 0) * 100)}%
+              </span>
+            ))}
           </div>
         </div>
       </div>
@@ -3156,7 +3607,8 @@ ${textReminder}`;
         )}
       </div>
     </div>
-  );
+    );
+  };
 
   // Architecture Modal
   const renderArchitectureModal = () => (
