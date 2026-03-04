@@ -389,6 +389,15 @@ export default function HajwalahAgent() {
   const [styleRefs, setStyleRefs] = useState([]);
   const [styleRefsLoading, setStyleRefsLoading] = useState(true);
 
+  // Training Mode state
+  const [trainingMode, setTrainingMode] = useState(false);
+  const [trainingTopic, setTrainingTopic] = useState("");
+  const [trainingImages, setTrainingImages] = useState([]);
+  const [isTraining, setIsTraining] = useState(false);
+  const [trainingLiked, setTrainingLiked] = useState(null);
+  const [trainingLearning, setTrainingLearning] = useState(false);
+  const [trainingToast, setTrainingToast] = useState("");
+
   // Agent Memory System — persisted via localStorage
   const [agentMemory, setAgentMemory] = useState(saved?.agentMemory ?? DEFAULT_MEMORY);
 
@@ -852,6 +861,174 @@ ${textReminder}`;
     }
   };
 
+  // --- Training Mode handlers ---
+
+  const createThumbnailFromDataURL = (dataURL, maxDim = 128) =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        const scale = maxDim / Math.max(width, height);
+        const tw = Math.round(width * scale);
+        const th = Math.round(height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = tw;
+        canvas.height = th;
+        canvas.getContext("2d").drawImage(img, 0, 0, tw, th);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.src = dataURL;
+    });
+
+  const handleStartTraining = async () => {
+    if (!trainingTopic.trim()) return;
+    setIsTraining(true);
+    setTrainingLiked(null);
+    setTrainingToast("");
+    setTrainingImages(trainingVariations.map((v) => ({ image: null, prompt: "", label: v.label, status: "loading" })));
+
+    const sp = agentMemory.styleProfile;
+    const stylePatterns = (agentMemory.learnedPatterns || [])
+      .filter((p) => p.weight >= 0.7)
+      .map((p) => p.pattern)
+      .join(", ");
+
+    const basePrompt = `Hajwalah Corsa 2 racing game, ${trainingTopic.trim()}, color palette: ${sp.preferredColors.join(", ")}, composition: ${sp.preferredComposition}, ${stylePatterns}`;
+
+    const textRuleBlock = `⛔ ABSOLUTE RULE — ZERO TEXT ON IMAGE ⛔
+- DO NOT render any text, letters, words, numbers, or symbols
+- DO NOT add titles, hashtags, labels, captions, or watermarks
+- The output must be PURELY VISUAL with ZERO typography`;
+
+    // Build style ref inlineData parts (up to 3)
+    const refParts = [];
+    if (styleRefs.length > 0) {
+      for (const ref of styleRefs.slice(-3)) {
+        refParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
+      }
+    }
+
+    const promises = trainingVariations.map(async (variation, i) => {
+      const fullPrompt = `${textRuleBlock}\n\n${variation.prefix} ${basePrompt}`;
+      const parts = [...refParts, { text: fullPrompt }];
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+
+      try {
+        const response = await fetch(IMAGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+          }),
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) throw new Error(`API ${response.status}`);
+
+        const data = await response.json();
+        const candidate = data.candidates?.[0];
+        if (candidate?.finishReason && candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS") {
+          throw new Error(candidate.finishReason);
+        }
+        const imagePart = (candidate?.content?.parts || []).find((p) => p.inlineData);
+        if (!imagePart) throw new Error("No image returned");
+
+        const { mimeType, data: imgData } = imagePart.inlineData;
+        const dataURL = `data:${mimeType};base64,${imgData}`;
+        return { image: dataURL, prompt: fullPrompt, label: variation.label, status: "done" };
+      } catch (err) {
+        clearTimeout(timeout);
+        return { image: null, prompt: fullPrompt, label: variation.label, status: "error", error: err.message };
+      }
+    });
+
+    // Update results progressively
+    promises.forEach((p, i) => {
+      p.then((result) => {
+        setTrainingImages((prev) => prev.map((item, idx) => idx === i ? result : item));
+      });
+    });
+
+    await Promise.allSettled(promises);
+    setIsTraining(false);
+  };
+
+  const handleTrainingLike = async (index) => {
+    const liked = trainingImages[index];
+    if (!liked || liked.status !== "done" || !liked.image) return;
+    setTrainingLiked(index);
+    setTrainingLearning(true);
+
+    try {
+      // 1. Save liked image as style reference
+      const [, payload] = liked.image.split(",");
+      const mimeType = liked.image.match(/data:([^;]+)/)?.[1] || "image/png";
+      const thumbnail = await createThumbnailFromDataURL(liked.image);
+      const record = {
+        id: crypto.randomUUID(),
+        mimeType,
+        data: payload,
+        thumbnail,
+        addedAt: Date.now(),
+      };
+      await idbPut(record);
+      setStyleRefs((prev) => [...prev, record]);
+
+      // 2. Extract patterns via TEXT_URL
+      const otherPrompts = trainingImages
+        .filter((_, i) => i !== index && trainingImages[i].status === "done")
+        .map((t) => t.prompt)
+        .join("\n---\n");
+
+      const analysisPrompt = `The user liked this image prompt:\n"${liked.prompt}"\n\nThey did NOT like these prompts:\n${otherPrompts}\n\nExtract 1-2 specific visual patterns that made the liked prompt better. Return JSON only:\n{"patterns": [{"pattern": "description in Arabic", "weight": 0.85}]}`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
+      const response = await fetch(TEXT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: analysisPrompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
+        }),
+      });
+      clearTimeout(timeout);
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (rawText) {
+          const result = extractJSON(rawText);
+          if (result?.patterns && Array.isArray(result.patterns)) {
+            setAgentMemory((prev) => ({
+              ...prev,
+              learnedPatterns: [
+                ...prev.learnedPatterns,
+                ...result.patterns.map((p) => ({
+                  pattern: p.pattern,
+                  weight: Math.max(0.1, Math.min(1, p.weight || 0.85)),
+                  source: "training",
+                })),
+              ],
+            }));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Training like error:", err);
+    } finally {
+      setTrainingLearning(false);
+      setTrainingToast("تم التعلم! أضفت الصورة كمرجع بصري + نمط جديد");
+      setTimeout(() => setTrainingToast(""), 4000);
+    }
+  };
+
   // --- Image upload + Gemini style analysis ---
 
   const handleStyleImageUpload = (e) => {
@@ -942,6 +1119,14 @@ ${textReminder}`;
     { id: "tip", label: "نصيحة لعب", emoji: "💡", desc: "نصيحة أو حركة هجولة" },
     { id: "season", label: "موسم جديد", emoji: "🌟", desc: "إعلان موسم أو باتل باس" },
     { id: "collab", label: "تعاون", emoji: "🤝", desc: "شراكة أو تعاون مع براند" },
+  ];
+
+  const trainingVariations = [
+    { label: "إضاءة درامية", prefix: "Dramatic cinematic lighting, dark moody background, strong shadows and rim light," },
+    { label: "ألوان حية", prefix: "Vibrant saturated colors, high-energy action shot, motion blur on wheels," },
+    { label: "لقطة سينمائية", prefix: "Ultra-wide cinematic shot, dramatic perspective, epic scale composition," },
+    { label: "تفاصيل قريبة", prefix: "Extreme close-up detail shot, shallow depth of field, macro focus on car details," },
+    { label: "ستايل فني", prefix: "Stylized illustrated feel, bold graphic shapes, cel-shaded rendering style," },
   ];
 
   const rejectionReasons = [
@@ -1258,7 +1443,7 @@ ${textReminder}`;
   const renderGenerate = () => (
     <div style={{ animation: "fadeUp 0.6s ease", maxWidth: 800, margin: "0 auto", padding: "40px 20px" }}>
       <button
-        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); }}
+        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setTrainingMode(false); setTrainingImages([]); setTrainingLiked(null); }}
         style={{
           background: "none",
           border: "none",
@@ -1465,6 +1650,262 @@ ${textReminder}`;
           >
             {isGenerating ? "⏳ الوكيل يشتغل..." : "🎨 ولّد البوست"}
           </button>
+
+          {/* Training Mode Toggle */}
+          <button
+            onClick={() => setTrainingMode(!trainingMode)}
+            style={{
+              width: "100%",
+              marginTop: 12,
+              background: trainingMode ? `linear-gradient(135deg, #f59e0b, #d97706)` : "white",
+              color: trainingMode ? "white" : PURPLE[700],
+              border: `2px solid ${trainingMode ? "#d97706" : PURPLE[200]}`,
+              padding: "14px 36px",
+              borderRadius: 16,
+              fontSize: 16,
+              fontWeight: 700,
+              cursor: "pointer",
+              transition: "all 0.3s",
+              fontFamily: "'Tajawal', sans-serif",
+            }}
+          >
+            🎯 وضع التدريب
+          </button>
+
+          {/* Training Mode Panel */}
+          {trainingMode && (
+            <div style={{
+              marginTop: 24,
+              background: "white",
+              borderRadius: 24,
+              padding: 28,
+              border: `2px solid #f59e0b`,
+              boxShadow: "0 8px 32px rgba(245,158,11,0.12)",
+            }}>
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 20,
+                direction: "rtl",
+              }}>
+                <span style={{ fontSize: 24 }}>🎯</span>
+                <h3 style={{
+                  fontSize: 20,
+                  fontWeight: 800,
+                  color: PURPLE[900],
+                  fontFamily: "'Tajawal', sans-serif",
+                  margin: 0,
+                }}>
+                  وضع التدريب
+                </h3>
+              </div>
+
+              <p style={{
+                fontSize: 14,
+                color: "#64748b",
+                marginBottom: 16,
+                fontFamily: "'Tajawal', sans-serif",
+                direction: "rtl",
+              }}>
+                أدخل موضوع وراح يتم توليد 5 صور بأنماط مختلفة — اختر المفضلة وراح يتعلم الوكيل من ذوقك
+              </p>
+
+              <div style={{ display: "flex", gap: 12, marginBottom: 20, direction: "rtl" }}>
+                <input
+                  type="text"
+                  value={trainingTopic}
+                  onChange={(e) => setTrainingTopic(e.target.value)}
+                  placeholder="مثال: سيارة دريفت في الليل..."
+                  disabled={isTraining}
+                  style={{
+                    flex: 1,
+                    padding: "12px 16px",
+                    borderRadius: 12,
+                    border: `2px solid ${PURPLE[100]}`,
+                    fontSize: 15,
+                    fontFamily: "'Tajawal', sans-serif",
+                    direction: "rtl",
+                    outline: "none",
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = "#f59e0b"}
+                  onBlur={(e) => e.target.style.borderColor = PURPLE[100]}
+                  onKeyDown={(e) => e.key === "Enter" && handleStartTraining()}
+                />
+                <button
+                  onClick={handleStartTraining}
+                  disabled={isTraining || !trainingTopic.trim()}
+                  style={{
+                    background: trainingTopic.trim() && !isTraining
+                      ? "linear-gradient(135deg, #f59e0b, #d97706)"
+                      : "#e2e8f0",
+                    color: trainingTopic.trim() && !isTraining ? "white" : "#94a3b8",
+                    border: "none",
+                    padding: "12px 24px",
+                    borderRadius: 12,
+                    fontSize: 15,
+                    fontWeight: 700,
+                    cursor: trainingTopic.trim() && !isTraining ? "pointer" : "not-allowed",
+                    fontFamily: "'Tajawal', sans-serif",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {isTraining ? "⏳ جاري التوليد..." : "🚀 ابدأ التدريب"}
+                </button>
+              </div>
+
+              {/* Training Images Grid */}
+              {trainingImages.length > 0 && (
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, 1fr)",
+                  gap: 12,
+                }}>
+                  {trainingImages.map((item, i) => (
+                    <div key={i} style={{
+                      borderRadius: 16,
+                      overflow: "hidden",
+                      border: `2px solid ${trainingLiked === i ? "#f59e0b" : PURPLE[100]}`,
+                      background: PURPLE[50],
+                      transition: "all 0.3s",
+                      boxShadow: trainingLiked === i ? "0 4px 20px rgba(245,158,11,0.3)" : "none",
+                    }}>
+                      {/* Image Area */}
+                      <div style={{ position: "relative", aspectRatio: "1", overflow: "hidden" }}>
+                        {item.status === "loading" && (
+                          <div style={{
+                            width: "100%",
+                            height: "100%",
+                            background: `linear-gradient(135deg, ${PURPLE[100]}, ${PURPLE[200]})`,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}>
+                            <div style={{
+                              width: 40,
+                              height: 40,
+                              border: `4px solid ${PURPLE[200]}`,
+                              borderTopColor: PURPLE[600],
+                              borderRadius: "50%",
+                              animation: "spin 1s linear infinite",
+                            }} />
+                          </div>
+                        )}
+                        {item.status === "done" && item.image && (
+                          <img
+                            src={item.image}
+                            alt={item.label}
+                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                          />
+                        )}
+                        {item.status === "error" && (
+                          <div style={{
+                            width: "100%",
+                            height: "100%",
+                            background: "#fef2f2",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 8,
+                          }}>
+                            <span style={{ fontSize: 28 }}>⚠️</span>
+                            <span style={{ fontSize: 12, color: "#dc2626", fontFamily: "'Tajawal', sans-serif" }}>
+                              {item.error || "خطأ"}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Label + Like Button */}
+                      <div style={{
+                        padding: "10px 12px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        direction: "rtl",
+                      }}>
+                        <span style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: PURPLE[800],
+                          fontFamily: "'Tajawal', sans-serif",
+                        }}>
+                          {item.label}
+                        </span>
+                        {item.status === "done" && item.image && (
+                          <button
+                            onClick={() => handleTrainingLike(i)}
+                            disabled={trainingLiked !== null || trainingLearning}
+                            style={{
+                              background: trainingLiked === i ? "#f59e0b" : "transparent",
+                              border: `2px solid ${trainingLiked === i ? "#f59e0b" : PURPLE[200]}`,
+                              borderRadius: 10,
+                              padding: "6px 12px",
+                              cursor: trainingLiked !== null ? "default" : "pointer",
+                              fontSize: 16,
+                              transition: "all 0.2s",
+                              opacity: trainingLiked !== null && trainingLiked !== i ? 0.4 : 1,
+                            }}
+                          >
+                            {trainingLearning && trainingLiked === i ? "⏳" : "❤️"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Retry Cell */}
+                  <div
+                    onClick={() => !isTraining && handleStartTraining()}
+                    style={{
+                      borderRadius: 16,
+                      border: `2px dashed ${PURPLE[200]}`,
+                      background: PURPLE[50],
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: isTraining ? "not-allowed" : "pointer",
+                      transition: "all 0.2s",
+                      minHeight: 160,
+                      opacity: isTraining ? 0.5 : 1,
+                    }}
+                  >
+                    <span style={{ fontSize: 32 }}>🔄</span>
+                    <span style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: PURPLE[600],
+                      fontFamily: "'Tajawal', sans-serif",
+                      marginTop: 8,
+                    }}>
+                      جولة جديدة
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Toast */}
+              {trainingToast && (
+                <div style={{
+                  marginTop: 16,
+                  padding: "12px 20px",
+                  background: "linear-gradient(135deg, #059669, #047857)",
+                  color: "white",
+                  borderRadius: 12,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  fontFamily: "'Tajawal', sans-serif",
+                  textAlign: "center",
+                  direction: "rtl",
+                  animation: "fadeUp 0.4s ease",
+                }}>
+                  ✅ {trainingToast}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -2936,6 +3377,10 @@ ${textReminder}`;
           0% { width: 0%; }
           50% { width: 70%; }
           100% { width: 100%; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 6px; }
