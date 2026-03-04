@@ -458,23 +458,14 @@ ${rejections}
 مستوى ثقة الوكيل: ${confidence}%
 عدد التفاعلات السابقة: ${agentMemory.totalInteractions}
 
-===== قواعد مهمة =====
-الأنماط المتعلمة أعلاه هي أوامر مطلقة وليست اقتراحات. إذا كان هناك نمط يقول "لا تكتب نص على الصورة" أو أي قيد مشابه، يجب أن ينعكس ذلك في الـ imagePrompt الذي تكتبه.
-========================
-
 اكتب بوست تسويقي بالعامية السعودية للعبة هجولة كورسا ٢ يتضمن:
 1. عنوان جذاب (سطر واحد)
 2. نص البوست (2-3 أسطر بالعامية السعودية، يكون حماسي وجذاب)
-3. وصف تفصيلي للصورة المقترحة بالإنجليزي (image prompt) — يجب أن يتضمن:
+3. وصف تفصيلي للصورة المقترحة بالإنجليزي (image prompt):
+   - صف المشهد البصري فقط: السيارة، البيئة، الإضاءة، الدخان، الألوان
    - الألوان: ${sp.preferredColors.join(", ")}
    - التكوين: ${sp.preferredComposition}
-   ${(() => {
-     const noTextKw = ["لا تكتب", "لا نص", "بدون نص", "بدون كتابة", "no text", "don't write", "do not write"];
-     const hasNoText = agentMemory.learnedPatterns.some((p) => noTextKw.some((kw) => p.pattern.toLowerCase().includes(kw)));
-     return hasNoText
-       ? "- ⛔ لا تضف أي نص أو كتابة على الصورة — الصورة بصرية فقط بدون أي حروف"
-       : `- النص بخط ${fontMap[sp.arabicFont] || sp.arabicFont} في موقع ${placementMap[sp.textPlacement] || sp.textPlacement}\n   - تباين لوني عالي مع نص عربي عريض`;
-   })()}
+   - ⛔ لا تذكر أي نص أو كتابة في وصف الصورة — الصورة بصرية فقط بدون حروف أو كلمات
 4. هاشتاقات مناسبة (3-5)
 
 أجب بصيغة JSON فقط بدون أي نص إضافي:
@@ -551,97 +542,66 @@ ${rejections}
 
       const hasStyleRefs = styleRefs.length > 0;
       const sp = agentMemory.styleProfile;
-      const baseImagePrompt = content.imagePrompt
-        || `Hajwalah Corsa 2 racing game social media post, ${content.title}, dark background, neon purple lighting, drift smoke, Arabic gaming aesthetic, dramatic, high quality`;
-
       const postTitle = content.title || "";
-      const postHashtags = (content.hashtags || []).join(" ");
 
-      // ===== MEMORY HIERARCHY: Manual patterns override system defaults =====
+      const baseImagePrompt = content.imagePrompt
+        || `Hajwalah Corsa 2 racing game, ${postTitle}, dark background, neon purple lighting, drift smoke, dramatic, high quality`;
+
+      // Collect learned style patterns (non-prohibition)
       const allPatterns = agentMemory.learnedPatterns || [];
-      const noTextKeywords = ["لا تكتب", "لا نص", "بدون نص", "بدون كتابة", "no text", "don't write", "do not write"];
-      const hasNoTextConstraint = allPatterns.some((p) =>
-        noTextKeywords.some((kw) => p.pattern.toLowerCase().includes(kw))
-      );
-
-      // Separate patterns into constraints (prohibitions) and style patterns
-      const constraintPatterns = allPatterns
-        .filter((p) => p.weight >= 0.7)
-        .filter((p) => /لا |بدون |no |don't |do not |تجنب/.test(p.pattern.toLowerCase()))
-        .map((p) => `- ⛔ ${p.pattern}`)
-        .join("\n");
-
       const stylePatterns = allPatterns
         .filter((p) => p.weight >= 0.7)
-        .filter((p) => !/لا |بدون |no |don't |do not |تجنب/.test(p.pattern.toLowerCase()))
         .map((p) => `- ${p.pattern}`)
         .join("\n");
 
-      // Build style constraints — conditionally include text/font directives
-      const styleConstraints = hasNoTextConstraint
-        ? `
-MANDATORY STYLE PROFILE (from agent memory):
-- Color palette: ${sp.preferredColors.join(", ")} (use these as the dominant colors)
-- Composition: ${sp.preferredComposition} layout
-- High contrast and dramatic lighting`
-        : `
-MANDATORY STYLE PROFILE (from agent memory):
-- Color palette: ${sp.preferredColors.join(", ")} (use these as the dominant colors)
-- Composition: ${sp.preferredComposition} layout
-- Arabic font style: ${sp.arabicFont}
-- Text placement: ${sp.textPlacement} of the image
-- High contrast between text and background
-- Bold Arabic text`;
-
-      // Build text content section — only if no "no text" constraint
-      const textContentSection = hasNoTextConstraint
-        ? `
-TEXT RULES (from user memory — ABSOLUTE PRIORITY):
-- DO NOT render, write, overlay, or embed ANY text on the image
-- DO NOT add titles, hashtags, watermarks, or any written words
-- The image must be purely visual — no typography whatsoever
-- This rule overrides ALL other instructions about text`
-        : `
-TEXT TO RENDER ON THE IMAGE:
-- Title: ${postTitle}
-- Hashtags: ${postHashtags}
-- Game name: هجولة كورسا ٢ / Hajwalah Corsa 2`;
+      // ===== HARD CONSTRAINT: NO TEXT ON IMAGES =====
+      // Text/hashtags/watermarks are NEVER added unless user explicitly typed text in promptInput
+      const noTextBlock = `
+⛔⛔⛔ ABSOLUTE RULE — ZERO TEXT ON IMAGE ⛔⛔⛔
+- DO NOT render, write, draw, or overlay ANY text, letters, words, numbers, or symbols on the image
+- DO NOT add titles, hashtags, labels, captions, or watermarks
+- DO NOT add Arabic text, English text, or any other language
+- DO NOT add branding bars, credit lines, or attribution text
+- The output must be a PURELY VISUAL image with ZERO typography
+- If you are tempted to add text: DON'T. Leave it blank.
+- This rule is NON-NEGOTIABLE and overrides every other instruction
+⛔⛔⛔ END ABSOLUTE RULE ⛔⛔⛔`;
 
       const imagePromptText = hasStyleRefs
-        ? `Create a new, original image for a social media post about: "${postTitle}"
+        ? `${noTextBlock}
 
-===== USER CONSTRAINTS (HIGHEST PRIORITY — override everything else) =====
-${constraintPatterns || "None"}
-======================================================================
-${styleConstraints}
+Create a purely visual image (NO TEXT) for: "${postTitle}"
 
-LEARNED VISUAL PATTERNS:
+STYLE PROFILE:
+- Color palette: ${sp.preferredColors.join(", ")}
+- Composition: ${sp.preferredComposition}
+- High contrast, dramatic lighting
+
+LEARNED PATTERNS:
 ${stylePatterns}
-${textContentSection}
 
-VISUAL STYLE FROM REFERENCE IMAGES — learn from the ${Math.min(styleRefs.length, 3)} attached screenshots:
-- Copy ONLY the visual style: 3D rendering quality, lighting, color grading, material textures, atmospheric effects
-- Copy ONLY the design language: composition layout, gradient overlays, card formatting
-- Match the Unity 3D mid-fidelity game aesthetic (NOT photorealistic)
-- Match the KSA environment aesthetics: desert terrain, Saudi streets, drift arenas
+REFERENCE IMAGES (style only):
+- Learn ONLY the visual style from the ${Math.min(styleRefs.length, 3)} attached screenshots: rendering, lighting, colors, textures
+- DO NOT copy any text, words, or specific content from references
+- Match Unity 3D mid-fidelity aesthetic (NOT photorealistic)
+- KSA environments: desert, Saudi streets, drift arenas
 
-CRITICAL — DO NOT copy from the reference images:
-- DO NOT copy, reproduce, or reuse ANY text or words from the reference images
-- DO NOT copy specific car models, specific scenes, or specific content from the references
-- The reference images are ONLY for learning the art style and design format
+SCENE: ${baseImagePrompt}
 
-Generate a completely new scene that matches the visual style of the references but illustrates the NEW post topic above.
-${baseImagePrompt}`
-        : `${baseImagePrompt}
+REMINDER: The final image must contain ZERO text. Purely visual.`
+        : `${noTextBlock}
 
-===== USER CONSTRAINTS (HIGHEST PRIORITY — override everything else) =====
-${constraintPatterns || "None"}
-======================================================================
-${styleConstraints}
+${baseImagePrompt}
 
-LEARNED VISUAL PATTERNS:
+STYLE PROFILE:
+- Color palette: ${sp.preferredColors.join(", ")}
+- Composition: ${sp.preferredComposition}
+- High contrast, dramatic lighting
+
+LEARNED PATTERNS:
 ${stylePatterns}
-${textContentSection}`;
+
+REMINDER: The final image must contain ZERO text. Purely visual.`;
 
       // Build multimodal parts: reference images (up to 3) + text prompt
       const imageParts = [];
