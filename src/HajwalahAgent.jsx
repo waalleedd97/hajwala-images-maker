@@ -458,7 +458,17 @@ ${rejections}
 مستوى ثقة الوكيل: ${confidence}%
 عدد التفاعلات السابقة: ${agentMemory.totalInteractions}
 
-اكتب بوست تسويقي بالعامية السعودية للعبة هجولة كورسا ٢ يتضمن:
+===== مرحلة التفكير (مطلوبة قبل الكتابة) =====
+قبل ما تكتب البوست، فكّر وأجب على هذي الأسئلة:
+1. وش الإحساس الأساسي اللي لازم هالبوست يثيره عند جمهور الألعاب السعودي؟ (حماس / فضول / خوف يفوته شي / فخر / فكاهة)
+2. وش الفعل الواحد اللي المفروض القارئ يسويه بعد ما يقرأ البوست؟
+3. وش أسباب الرفض السابقة من الذاكرة اللي لازم هالبوست يتجنبها بشكل فعّال؟
+4. وش الأنماط الناجحة من الذاكرة اللي وزنها عالي (≥ 80%) واللي لازم أطبّقها؟
+5. وش اللي يخلي هالبوست حصري لهجولة كورسا ٢ — مو مجرد بوست لعبة عام؟
+اكتب تحليلك في حقل "thinking" بالعربي.
+==================================================
+
+بعد التفكير، اكتب بوست تسويقي بالعامية السعودية للعبة هجولة كورسا ٢ يتضمن:
 1. عنوان جذاب (سطر واحد)
 2. نص البوست (2-3 أسطر بالعامية السعودية، يكون حماسي وجذاب)
 3. وصف تفصيلي للصورة المقترحة بالإنجليزي (image prompt):
@@ -469,7 +479,7 @@ ${rejections}
 4. هاشتاقات مناسبة (3-5)
 
 أجب بصيغة JSON فقط بدون أي نص إضافي:
-{"title": "...", "body": "...", "imagePrompt": "...", "hashtags": ["..."]}`;
+{"thinking": "تحليلك للأسئلة الخمسة...", "title": "...", "body": "...", "imagePrompt": "...", "hashtags": ["..."]}`;
   };
 
   const handleGenerate = async () => {
@@ -493,7 +503,8 @@ ${rejections}
       addThought("🎨 بناء البرومبت بناءً على الأنماط المتعلمة...");
 
       const prompt = buildAgentPrompt();
-      addThought("📡 إرسال البرومبت إلى Gemini 3.1 Pro...");
+      addThought("🤔 الوكيل يفكّر ويحلل قبل الكتابة...");
+      addThought("📡 إرسال البرومبت إلى Gemini 3.1 Flash Lite...");
 
       const textController = new AbortController();
       const textTimeout = setTimeout(() => textController.abort(), 60000);
@@ -507,7 +518,7 @@ ${rejections}
           generationConfig: {
             temperature: 0.9,
             topP: 0.95,
-            maxOutputTokens: 1024,
+            maxOutputTokens: 2048,
           },
         }),
       });
@@ -531,6 +542,16 @@ ${rejections}
       const content = extractJSON(rawText);
       if (!content) {
         throw new Error("تنسيق الرد غير صحيح");
+      }
+
+      // Extract and display agent thinking in the thinking panel
+      if (content.thinking) {
+        addThought("💭 تحليل الوكيل قبل الكتابة:");
+        const thinkingLines = content.thinking.split(/\n|(?:\d+[.)])/g).filter((l) => l.trim());
+        for (const line of thinkingLines) {
+          addThought(`   → ${line.trim()}`);
+        }
+        await new Promise((r) => setTimeout(r, 400));
       }
 
       setGeneratedContent(content);
