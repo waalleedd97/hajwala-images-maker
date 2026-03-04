@@ -425,7 +425,25 @@ export default function HajwalahAgent() {
       .finally(() => setStyleRefsLoading(false));
   }, []);
 
-  const buildAgentPrompt = () => {
+  // Shared text-override regex patterns (used by both text model + image model)
+  const textOverridePatterns = [
+    /أضف (?:النص|نص|كتابة|عبارة)\s*[:\u061B]?\s*(.+)/i,
+    /اكتب (?:على الصورة|النص|نص)\s*[:\u061B]?\s*(.+)/i,
+    /add (?:the )?(?:following )?text\s*[:\u061B]?\s*(.+)/i,
+    /write (?:on (?:the )?image)?\s*[:\u061B]?\s*(.+)/i,
+    /text\s*[:\u061B]\s*(.+)/i,
+    /نص\s*[:\u061B]\s*(.+)/i,
+  ];
+
+  const detectTextOverride = (input) => {
+    for (const rx of textOverridePatterns) {
+      const m = (input || "").match(rx);
+      if (m) return m[1].trim();
+    }
+    return null;
+  };
+
+  const buildAgentPrompt = (userExplicitText) => {
     const postType = postTypes.find((p) => p.id === selectedPostType);
     const patterns = agentMemory.learnedPatterns.map((p) => {
       const sourceTag = p.source === "image-analysis" ? " [من صورة]" : p.source === "manual" ? " [يدوي]" : "";
@@ -445,6 +463,10 @@ export default function HajwalahAgent() {
     const compMap = { "dynamic-diagonal": "قطري ديناميكي", "centered": "مركزي", "rule-of-thirds": "قاعدة الأثلاث" };
     const fontMap = { "bold-kufi": "كوفي عريض", "naskh": "نسخ", "ruqaa": "رقعة" };
     const placementMap = { "bottom-right": "أسفل-يمين", "center": "وسط", "top-right": "أعلى-يمين" };
+
+    const textInstruction = userExplicitText
+      ? `   - ✅ المستخدم طلب نص على الصورة — اذكر في الوصف إن الصورة تحتوي على النص المطلوب: "${userExplicitText}"`
+      : "   - ⛔ لا تذكر أي نص أو كتابة في وصف الصورة — الصورة بصرية فقط بدون حروف أو كلمات";
 
     return `أنت وكيل تسويق ذكي متخصص في لعبة "هجولة كورسا ٢" — لعبة تفحيط وسيارات عربية سعودية.
 
@@ -484,13 +506,7 @@ ${rejections}
    - صف المشهد البصري: السيارة، البيئة، الإضاءة، الدخان، الألوان
    - الألوان: ${sp.preferredColors.join(", ")}
    - التكوين: ${sp.preferredComposition}
-${(() => {
-  const noTextKw = ["أضف نص", "أضف النص", "اكتب على", "اكتب نص", "add text", "write on", "text:", "نص:"];
-  const hasOverride = noTextKw.some((kw) => (promptInput || "").toLowerCase().includes(kw));
-  return hasOverride
-    ? "   - ✅ المستخدم طلب نص على الصورة — اذكر في الوصف إن الصورة تحتوي على النص المطلوب"
-    : "   - ⛔ لا تذكر أي نص أو كتابة في وصف الصورة — الصورة بصرية فقط بدون حروف أو كلمات";
-})()}
+${textInstruction}
 4. هاشتاقات مناسبة (3-5)
 
 أجب بصيغة JSON فقط بدون أي نص إضافي:
@@ -517,7 +533,14 @@ ${(() => {
       await new Promise((r) => setTimeout(r, 300));
       addThought("🎨 بناء البرومبت بناءً على الأنماط المتعلمة...");
 
-      const prompt = buildAgentPrompt();
+      // Detect text override ONCE — shared by text model + image model
+      const userExplicitText = detectTextOverride(promptInput);
+      console.log("[TextOverride] promptInput:", JSON.stringify(promptInput || ""), "| detected:", userExplicitText);
+      if (userExplicitText) {
+        addThought(`✍️ تم كشف نص مطلوب: "${userExplicitText}"`);
+      }
+
+      const prompt = buildAgentPrompt(userExplicitText);
       addThought("🤔 الوكيل يفكّر ويحلل قبل الكتابة...");
       addThought("📡 إرسال البرومبت إلى Gemini 3.1 Flash Lite...");
 
@@ -590,28 +613,7 @@ ${(() => {
         .map((p) => `- ${p.pattern}`)
         .join("\n");
 
-      // ===== EXPLICIT TEXT OVERRIDE DETECTION =====
-      // Detect user commands like "أضف نص: ..." or "Add text: ..."
-      const textOverridePatterns = [
-        /أضف (?:النص|نص|كتابة|عبارة)\s*:\s*(.+)/i,
-        /اكتب (?:على الصورة|النص|نص)\s*:\s*(.+)/i,
-        /add (?:the )?(?:following )?text\s*:\s*(.+)/i,
-        /write (?:on (?:the )?image)?\s*:\s*(.+)/i,
-        /text\s*:\s*(.+)/i,
-        /نص\s*:\s*(.+)/i,
-      ];
-      let userExplicitText = null;
-      const userInput = promptInput || "";
-      for (const rx of textOverridePatterns) {
-        const m = userInput.match(rx);
-        if (m) { userExplicitText = m[1].trim(); break; }
-      }
-      console.log("[TextOverride] promptInput:", JSON.stringify(userInput), "| detected:", userExplicitText);
-      if (userExplicitText) {
-        addThought(`✍️ تم كشف نص مطلوب: "${userExplicitText}"`);
-      }
-
-      // Build text rule block
+      // Build text rule block (userExplicitText already detected above)
       const textRuleBlock = userExplicitText
         ? `
 ✅ USER TEXT OVERRIDE — Render this EXACT text on the image:
@@ -633,6 +635,14 @@ ${(() => {
         ? `REMINDER: Render ONLY this exact text: "${userExplicitText}" — nothing else.`
         : `REMINDER: The final image must contain ZERO text. Purely visual.`;
 
+      // When text override is active, build the scene description with a positive text-rendering command
+      const sceneBlock = userExplicitText
+        ? `Render the following Arabic text visually on the image in large, clear, bold typography centered prominently:
+"${userExplicitText}"
+The text must be the focal visual element. Use ${sp.arabicFont} style font, ${sp.textPlacement} placement.
+BACKGROUND SCENE: ${baseImagePrompt}`
+        : baseImagePrompt;
+
       const imagePromptText = hasStyleRefs
         ? `${textRuleBlock}
 
@@ -652,12 +662,12 @@ REFERENCE IMAGES (style only):
 - Match Unity 3D mid-fidelity aesthetic (NOT photorealistic)
 - KSA environments: desert, Saudi streets, drift arenas
 
-SCENE: ${baseImagePrompt}
+SCENE: ${sceneBlock}
 
 ${textReminder}`
         : `${textRuleBlock}
 
-${baseImagePrompt}
+${sceneBlock}
 
 STYLE PROFILE:
 - Color palette: ${sp.preferredColors.join(", ")}
@@ -679,6 +689,10 @@ ${textReminder}`;
         addThought(`🎮 إرفاق ${refsToSend.length} صور مرجعية لستايل اللعبة...`);
       }
       imageParts.push({ text: imagePromptText });
+
+      console.log("[DEBUG-IMG] userExplicitText:", JSON.stringify(userExplicitText));
+      console.log("[DEBUG-IMG] textRuleBlock:", textRuleBlock);
+      console.log("[DEBUG-IMG] FULL imagePromptText:", imagePromptText);
 
       const imageController = new AbortController();
       const imageTimeout = setTimeout(() => imageController.abort(), 60000);
