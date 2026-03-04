@@ -708,7 +708,8 @@ export default function HajwalahAgent() {
   const [trainingPlanSource, setTrainingPlanSource] = useState("");
   const [isTraining, setIsTraining] = useState(false);
   const [isPreparingTraining, setIsPreparingTraining] = useState(false);
-  const [trainingLiked, setTrainingLiked] = useState(null);
+  const [trainingLikedIndexes, setTrainingLikedIndexes] = useState([]);
+  const [trainingDislikedIndexes, setTrainingDislikedIndexes] = useState([]);
   const [trainingLearning, setTrainingLearning] = useState(false);
   const [trainingToast, setTrainingToast] = useState("");
   const [trainingPreviewIndex, setTrainingPreviewIndex] = useState(null);
@@ -1344,7 +1345,8 @@ Return JSON only:
 
     setIsTraining(true);
     setIsPreparingTraining(true);
-    setTrainingLiked(null);
+    setTrainingLikedIndexes([]);
+    setTrainingDislikedIndexes([]);
     setTrainingToast("");
     setTrainingPreviewIndex(null);
     setTrainingPlanSource("");
@@ -1352,15 +1354,15 @@ Return JSON only:
     try {
       const scoring = normalizeScoringEngine(agentMemory.scoringEngine);
       const sp = deriveStyleProfileFromScoring(scoring, agentMemory.styleProfile);
-      const stylePatterns = (agentMemory.learnedPatterns || [])
+      const rankedPatterns = (agentMemory.learnedPatterns || [])
         .map((p) => {
           const signal = scoring.patternScores[p.pattern]?.score ?? 0.5;
           return { pattern: p.pattern, effective: (p.weight * 0.7) + (signal * 0.3) };
         })
         .sort((a, b) => b.effective - a.effective)
-        .slice(0, 6)
-        .map((p) => p.pattern)
-        .join(", ");
+        .slice(0, 6);
+      const stylePatternList = rankedPatterns.map((p) => p.pattern);
+      const stylePatterns = stylePatternList.join(", ");
 
       const topic = trainingTopic.trim();
       const { directions, source } = await generateTrainingDirections(topic, sp, stylePatterns);
@@ -1371,6 +1373,13 @@ Return JSON only:
         prompt: "",
         label: v.label,
         direction: v.prefix,
+        trainingContext: {
+          postType: selectedPostType || "training",
+          textPolicy: "no-text",
+          styleProfile: sp,
+          usedColors: [...(sp.preferredColors || [])],
+          usedPatterns: [...stylePatternList, v.label, v.prefix].filter(Boolean),
+        },
         status: "loading",
       })));
       setIsPreparingTraining(false);
@@ -1430,10 +1439,37 @@ ${basePrompt}`;
 
           const { mimeType, data: imgData } = imagePart.inlineData;
           const dataURL = `data:${mimeType};base64,${imgData}`;
-          return { image: dataURL, prompt: fullPrompt, label: variation.label, direction: variation.prefix, status: "done" };
+          return {
+            image: dataURL,
+            prompt: fullPrompt,
+            label: variation.label,
+            direction: variation.prefix,
+            trainingContext: {
+              postType: selectedPostType || "training",
+              textPolicy: "no-text",
+              styleProfile: sp,
+              usedColors: [...(sp.preferredColors || [])],
+              usedPatterns: [...stylePatternList, variation.label, variation.prefix].filter(Boolean),
+            },
+            status: "done",
+          };
         } catch (err) {
           clearTimeout(timeout);
-          return { image: null, prompt: fullPrompt, label: variation.label, direction: variation.prefix, status: "error", error: err.message };
+          return {
+            image: null,
+            prompt: fullPrompt,
+            label: variation.label,
+            direction: variation.prefix,
+            trainingContext: {
+              postType: selectedPostType || "training",
+              textPolicy: "no-text",
+              styleProfile: sp,
+              usedColors: [...(sp.preferredColors || [])],
+              usedPatterns: [...stylePatternList, variation.label, variation.prefix].filter(Boolean),
+            },
+            status: "error",
+            error: err.message,
+          };
         }
       });
 
@@ -1451,74 +1487,187 @@ ${basePrompt}`;
     }
   };
 
-  const handleTrainingLike = async (index) => {
-    const liked = trainingImages[index];
-    if (!liked || liked.status !== "done" || !liked.image) return;
-    setTrainingLiked(index);
+  const handleToggleTrainingLike = (index) => {
+    const item = trainingImages[index];
+    if (!item || item.status !== "done" || !item.image || trainingLearning) return;
+    setTrainingLikedIndexes((prev) => (
+      prev.includes(index)
+        ? prev.filter((i) => i !== index)
+        : [...prev, index]
+    ));
+    setTrainingDislikedIndexes((prev) => prev.filter((i) => i !== index));
+  };
+
+  const handleToggleTrainingDislike = (index) => {
+    const item = trainingImages[index];
+    if (!item || item.status !== "done" || !item.image || trainingLearning) return;
+    setTrainingDislikedIndexes((prev) => (
+      prev.includes(index)
+        ? prev.filter((i) => i !== index)
+        : [...prev, index]
+    ));
+    setTrainingLikedIndexes((prev) => prev.filter((i) => i !== index));
+  };
+
+  const handleAnalyzeTrainingFeedback = async () => {
+    if (trainingLearning) return;
+
+    const doneImages = trainingImages
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.status === "done" && item.image);
+
+    const likedSet = new Set(trainingLikedIndexes);
+    const dislikedSet = new Set(trainingDislikedIndexes);
+    const likedItems = doneImages.filter(({ index }) => likedSet.has(index)).map(({ item }) => item);
+    const dislikedItems = doneImages.filter(({ index }) => dislikedSet.has(index)).map(({ item }) => item);
+
+    if (likedItems.length === 0 && dislikedItems.length === 0) {
+      setTrainingToast("حدد على الأقل صورة واحدة بلايك أو دسلايك أولًا");
+      setTimeout(() => setTrainingToast(""), 3500);
+      return;
+    }
+
     setTrainingLearning(true);
-
     try {
-      // 1. Save liked image as style reference
-      const [, payload] = liked.image.split(",");
-      const mimeType = liked.image.match(/data:([^;]+)/)?.[1] || "image/png";
-      const thumbnail = await createThumbnailFromDataURL(liked.image);
-      const record = {
-        id: crypto.randomUUID(),
-        mimeType,
-        data: payload,
-        thumbnail,
-        addedAt: Date.now(),
-      };
-      await idbPut(record);
-      setStyleRefs((prev) => [...prev, record]);
+      // 1) Persist all liked images as style references.
+      const newRefs = [];
+      for (const liked of likedItems) {
+        const [, payload] = liked.image.split(",");
+        const mimeType = liked.image.match(/data:([^;]+)/)?.[1] || "image/png";
+        const thumbnail = await createThumbnailFromDataURL(liked.image);
+        const record = {
+          id: crypto.randomUUID(),
+          mimeType,
+          data: payload,
+          thumbnail,
+          addedAt: Date.now(),
+        };
+        await idbPut(record);
+        newRefs.push(record);
+      }
+      if (newRefs.length > 0) {
+        setStyleRefs((prev) => [...prev, ...newRefs]);
+      }
 
-      // 2. Extract patterns via TEXT_URL
-      const otherPrompts = trainingImages
-        .filter((_, i) => i !== index && trainingImages[i].status === "done")
-        .map((t) => t.prompt)
-        .join("\n---\n");
+      // 2) Ask model to extract both positive and negative visual signals.
+      const likedPromptBlock = likedItems.length > 0
+        ? likedItems.map((t, i) => `[LIKE ${i + 1}] label: ${t.label}\ndirection: ${t.direction || ""}\nprompt: ${t.prompt}`).join("\n\n")
+        : "none";
+      const dislikedPromptBlock = dislikedItems.length > 0
+        ? dislikedItems.map((t, i) => `[DISLIKE ${i + 1}] label: ${t.label}\ndirection: ${t.direction || ""}\nprompt: ${t.prompt}`).join("\n\n")
+        : "none";
 
-      const analysisPrompt = `The user liked this image prompt:\n"${liked.prompt}"\n\nThey did NOT like these prompts:\n${otherPrompts}\n\nExtract 1-2 specific visual patterns that made the liked prompt better. Return JSON only:\n{"patterns": [{"pattern": "description in Arabic", "weight": 0.85}]}`;
+      const analysisPrompt = `The user has rated a batch of generated drift images.
+
+LIKED prompts:
+${likedPromptBlock}
+
+DISLIKED prompts:
+${dislikedPromptBlock}
+
+Analyze both sides and return concise structured learning:
+- positivePatterns: what should be reinforced
+- negativePatterns: what should be avoided
+
+Return JSON only:
+{
+  "positivePatterns": [{"pattern":"Arabic short description","weight":0.82}],
+  "negativePatterns": [{"reason":"Arabic short description","weight":0.74}]
+}`;
+
+      let positivePatterns = [];
+      let negativePatterns = [];
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
+      try {
+        const response = await fetch(TEXT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: analysisPrompt }] }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: 700 },
+          }),
+        });
+        clearTimeout(timeout);
 
-      const response = await fetch(TEXT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: analysisPrompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
-        }),
-      });
-      clearTimeout(timeout);
-
-      if (response.ok) {
-        const data = await response.json();
-        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (rawText) {
-          const result = extractJSON(rawText);
-          if (result?.patterns && Array.isArray(result.patterns)) {
-            setAgentMemory((prev) => ({
-              ...prev,
-              learnedPatterns: [
-                ...prev.learnedPatterns,
-                ...result.patterns.map((p) => ({
-                  pattern: p.pattern,
-                  weight: Math.max(0.1, Math.min(1, p.weight || 0.85)),
-                  source: "training",
-                })),
-              ],
-            }));
+        if (response.ok) {
+          const data = await response.json();
+          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (rawText) {
+            const result = extractJSON(rawText);
+            positivePatterns = Array.isArray(result?.positivePatterns)
+              ? result.positivePatterns
+              : Array.isArray(result?.patterns) ? result.patterns : [];
+            negativePatterns = Array.isArray(result?.negativePatterns)
+              ? result.negativePatterns
+              : Array.isArray(result?.avoidPatterns) ? result.avoidPatterns : [];
           }
         }
+      } catch (err) {
+        clearTimeout(timeout);
+        console.warn("Training batch analysis fallback:", err);
       }
+
+      // 3) Update memory + scoring from likes and dislikes together.
+      setAgentMemory((prev) => {
+        let next = {
+          ...prev,
+          totalInteractions: prev.totalInteractions + likedItems.length + dislikedItems.length,
+          successfulPrompts: [
+            ...prev.successfulPrompts,
+            ...likedItems.map(() => ({ type: selectedPostType || "training", time: Date.now() })),
+          ],
+          styleProfile: {
+            ...prev.styleProfile,
+            confidence: clamp01(
+              prev.styleProfile.confidence + (likedItems.length * 0.03) - (dislikedItems.length * 0.015),
+            ),
+          },
+        };
+
+        if (positivePatterns.length > 0) {
+          next.learnedPatterns = [
+            ...next.learnedPatterns,
+            ...positivePatterns.map((p) => ({
+              pattern: p.pattern || p.text || "نمط إيجابي من التقييم",
+              weight: Math.max(0.1, Math.min(1, p.weight || 0.82)),
+              source: "training-feedback",
+            })),
+          ];
+        }
+
+        if (negativePatterns.length > 0) {
+          next.rejectionReasons = [
+            ...next.rejectionReasons,
+            ...negativePatterns.map((p) => ({
+              reason: p.reason || p.pattern || p.text || "نمط غير مرغوب",
+              type: "training",
+              time: Date.now(),
+            })),
+          ];
+        }
+
+        for (const item of likedItems) {
+          next = applyFeedbackToMemory(next, item.trainingContext, true, "");
+        }
+        for (const item of dislikedItems) {
+          next = applyFeedbackToMemory(next, item.trainingContext, false, "style");
+        }
+        return next;
+      });
+
+      setTrainingToast(
+        `تم التعلم من ${likedItems.length} لايك و ${dislikedItems.length} دسلايك`,
+      );
+      setTrainingLikedIndexes([]);
+      setTrainingDislikedIndexes([]);
     } catch (err) {
-      console.warn("Training like error:", err);
+      console.warn("Training feedback analysis error:", err);
+      setTrainingToast("صار خطأ أثناء تحليل التقييمات");
     } finally {
       setTrainingLearning(false);
-      setTrainingToast("تم التعلم! أضفت الصورة كمرجع بصري + نمط جديد");
       setTimeout(() => setTrainingToast(""), 4000);
     }
   };
@@ -1929,7 +2078,7 @@ ${basePrompt}`;
   const renderGenerate = () => (
     <div style={{ animation: "fadeUp 0.6s ease", maxWidth: 800, margin: "0 auto", padding: "40px 20px" }}>
       <button
-        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setLastGenerationContext(null); setTrainingMode(false); setTrainingImages([]); setTrainingDirections([]); setTrainingPlanSource(""); setTrainingLiked(null); setTrainingPreviewIndex(null); }}
+        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setLastGenerationContext(null); setTrainingMode(false); setTrainingImages([]); setTrainingDirections([]); setTrainingPlanSource(""); setTrainingLikedIndexes([]); setTrainingDislikedIndexes([]); setTrainingPreviewIndex(null); }}
         style={{
           background: "none",
           border: "none",
@@ -2144,6 +2293,8 @@ ${basePrompt}`;
                 setTrainingPreviewIndex(null);
                 setTrainingDirections([]);
                 setTrainingPlanSource("");
+                setTrainingLikedIndexes([]);
+                setTrainingDislikedIndexes([]);
               }
               setTrainingMode(!trainingMode);
             }}
@@ -2201,7 +2352,7 @@ ${basePrompt}`;
                 fontFamily: "'Tajawal', sans-serif",
                 direction: "rtl",
               }}>
-                أدخل موضوع وراح نبني تلقائيًا اتجاهات بصرية متنوعة وفريدة (بدون مودات ثابتة) — اختر الأفضل والوكيل يتعلم مباشرة من اختيارك
+                أدخل موضوع، قيّم الصور بـ لايك/دسلايك (تقدر تختار أكثر من صورة)، ثم خل الوكيل يحلل تقييماتك ويتعلم منها مباشرة
               </p>
 
               <div style={{ display: "flex", gap: 12, marginBottom: 20, direction: "rtl" }}>
@@ -2286,6 +2437,64 @@ ${basePrompt}`;
                 </div>
               )}
 
+              {trainingImages.length > 0 && (
+                <div style={{
+                  marginBottom: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  direction: "rtl",
+                }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{
+                      background: "#ecfdf5",
+                      color: "#047857",
+                      border: "1px solid #bbf7d0",
+                      borderRadius: 10,
+                      padding: "5px 10px",
+                      fontSize: 12,
+                      fontFamily: "'Tajawal', sans-serif",
+                      fontWeight: 700,
+                    }}>
+                      ❤️ لايك: {trainingLikedIndexes.length}
+                    </span>
+                    <span style={{
+                      background: "#fef2f2",
+                      color: "#b91c1c",
+                      border: "1px solid #fecaca",
+                      borderRadius: 10,
+                      padding: "5px 10px",
+                      fontSize: 12,
+                      fontFamily: "'Tajawal', sans-serif",
+                      fontWeight: 700,
+                    }}>
+                      👎 دسلايك: {trainingDislikedIndexes.length}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleAnalyzeTrainingFeedback}
+                    disabled={trainingLearning || (trainingLikedIndexes.length === 0 && trainingDislikedIndexes.length === 0)}
+                    style={{
+                      background: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0) && !trainingLearning
+                        ? "linear-gradient(135deg, #059669, #047857)"
+                        : "#e2e8f0",
+                      color: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0) && !trainingLearning ? "white" : "#94a3b8",
+                      border: "none",
+                      borderRadius: 12,
+                      padding: "9px 14px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      fontFamily: "'Tajawal', sans-serif",
+                      cursor: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0) && !trainingLearning ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    {trainingLearning ? "⏳ تحليل التقييمات..." : "🧠 حلل اللايك/الدسلايك"}
+                  </button>
+                </div>
+              )}
+
               {/* Training Images Grid */}
               {trainingImages.length > 0 && (
                 <div style={{
@@ -2293,14 +2502,23 @@ ${basePrompt}`;
                   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
                   gap: 14,
                 }}>
-                  {trainingImages.map((item, i) => (
+                  {trainingImages.map((item, i) => {
+                      const isLiked = trainingLikedIndexes.includes(i);
+                      const isDisliked = trainingDislikedIndexes.includes(i);
+                      const highlightColor = isLiked ? "#10b981" : isDisliked ? "#ef4444" : PURPLE[100];
+                      const highlightShadow = isLiked
+                        ? "0 4px 20px rgba(16,185,129,0.28)"
+                        : isDisliked
+                          ? "0 4px 20px rgba(239,68,68,0.25)"
+                          : "none";
+                      return (
                     <div key={i} style={{
                       borderRadius: 16,
                       overflow: "hidden",
-                      border: `2px solid ${trainingLiked === i ? "#f59e0b" : PURPLE[100]}`,
+                      border: `2px solid ${highlightColor}`,
                       background: PURPLE[50],
                       transition: "all 0.3s",
-                      boxShadow: trainingLiked === i ? "0 4px 20px rgba(245,158,11,0.3)" : "none",
+                      boxShadow: highlightShadow,
                     }}>
                       {/* Image Area */}
                       <div style={{
@@ -2440,27 +2658,50 @@ ${basePrompt}`;
                             🔎 تكبير
                           </button>
                           {item.status === "done" && item.image && (
-                            <button
-                              onClick={() => handleTrainingLike(i)}
-                              disabled={trainingLiked !== null || trainingLearning}
-                              style={{
-                                background: trainingLiked === i ? "#f59e0b" : "transparent",
-                                border: `2px solid ${trainingLiked === i ? "#f59e0b" : PURPLE[200]}`,
-                                borderRadius: 10,
-                                padding: "6px 12px",
-                                cursor: trainingLiked !== null ? "default" : "pointer",
-                                fontSize: 16,
-                                transition: "all 0.2s",
-                                opacity: trainingLiked !== null && trainingLiked !== i ? 0.4 : 1,
-                              }}
-                            >
-                              {trainingLearning && trainingLiked === i ? "⏳" : "❤️"}
-                            </button>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button
+                                onClick={() => handleToggleTrainingLike(i)}
+                                disabled={trainingLearning}
+                                style={{
+                                  background: isLiked ? "#10b981" : "transparent",
+                                  color: isLiked ? "white" : "#047857",
+                                  border: `2px solid ${isLiked ? "#10b981" : "#86efac"}`,
+                                  borderRadius: 10,
+                                  padding: "6px 9px",
+                                  cursor: trainingLearning ? "not-allowed" : "pointer",
+                                  fontSize: 14,
+                                  fontWeight: 700,
+                                  transition: "all 0.2s",
+                                  opacity: trainingLearning ? 0.6 : 1,
+                                }}
+                              >
+                                ❤️
+                              </button>
+                              <button
+                                onClick={() => handleToggleTrainingDislike(i)}
+                                disabled={trainingLearning}
+                                style={{
+                                  background: isDisliked ? "#ef4444" : "transparent",
+                                  color: isDisliked ? "white" : "#b91c1c",
+                                  border: `2px solid ${isDisliked ? "#ef4444" : "#fca5a5"}`,
+                                  borderRadius: 10,
+                                  padding: "6px 9px",
+                                  cursor: trainingLearning ? "not-allowed" : "pointer",
+                                  fontSize: 14,
+                                  fontWeight: 700,
+                                  transition: "all 0.2s",
+                                  opacity: trainingLearning ? 0.6 : 1,
+                                }}
+                              >
+                                👎
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
                     </div>
-                  ))}
+                      );
+                    })}
 
                   {/* Retry Cell */}
                   <div
