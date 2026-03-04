@@ -158,6 +158,40 @@ const DEFAULT_SCORING_ENGINE = {
   patternScores: {},
 };
 
+const FALLBACK_TRAINING_VARIATIONS = [
+  { label: "مطاردة ليلية", prefix: "Ultra-wide night pursuit drift on Saudi highway, long light trails, cinematic depth, aggressive speed lines, game-realistic reflections," },
+  { label: "زاوية منخفضة", prefix: "Low-angle close tracking shot near rear wheel, intense tire smoke, dramatic road texture, fast corner entry, high contrast rim light," },
+  { label: "ساحة صحراوية", prefix: "Open desert drift arena at golden hour, dusty atmosphere, wide spatial composition, warm highlights with cool shadows, dynamic skids," },
+  { label: "نيون ممطر", prefix: "Rain-soaked neon Saudi city street at night, wet asphalt reflections, controlled motion blur, moody cinematic glow, high drama drift moment," },
+  { label: "تفاصيل ميكانيكية", prefix: "Detailed close-up on suspension and spinning wheel, macro-like focus transitions, sparks and smoke interaction, tactile metallic materials," },
+  { label: "إثارة جماهيرية", prefix: "Event-style drift showdown with crowd barriers and floodlights, energetic atmosphere, hero-car framing, layered foreground background depth," },
+];
+
+const normalizePromptFingerprint = (text = "") =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+const dedupeTrainingVariations = (items = [], limit = 6) => {
+  const seen = new Set();
+  const seenLabels = new Set();
+  const out = [];
+  for (const item of items) {
+    const label = (item?.label || "").trim();
+    const prefix = (item?.prefix || "").trim();
+    if (!label || !prefix) continue;
+    const labelKey = normalizePromptFingerprint(label);
+    const fingerprint = normalizePromptFingerprint(prefix);
+    if (!fingerprint || seen.has(fingerprint) || seenLabels.has(labelKey)) continue;
+    seen.add(fingerprint);
+    seenLabels.add(labelKey);
+    out.push({ label, prefix });
+    if (out.length >= limit) break;
+  }
+  return out;
+};
+
 // 3D Icon Components
 const Icon3D = ({ type, size = 48 }) => {
   const icons = {
@@ -670,10 +704,14 @@ export default function HajwalahAgent() {
   const [trainingMode, setTrainingMode] = useState(false);
   const [trainingTopic, setTrainingTopic] = useState("");
   const [trainingImages, setTrainingImages] = useState([]);
+  const [trainingDirections, setTrainingDirections] = useState([]);
+  const [trainingPlanSource, setTrainingPlanSource] = useState("");
   const [isTraining, setIsTraining] = useState(false);
+  const [isPreparingTraining, setIsPreparingTraining] = useState(false);
   const [trainingLiked, setTrainingLiked] = useState(null);
   const [trainingLearning, setTrainingLearning] = useState(false);
   const [trainingToast, setTrainingToast] = useState("");
+  const [trainingPreviewIndex, setTrainingPreviewIndex] = useState(null);
 
   // Agent Memory System — persisted via localStorage
   const [agentMemory, setAgentMemory] = useState(
@@ -703,6 +741,15 @@ export default function HajwalahAgent() {
       .catch((err) => console.warn("Failed to load style refs:", err))
       .finally(() => setStyleRefsLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (trainingPreviewIndex === null) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setTrainingPreviewIndex(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [trainingPreviewIndex]);
 
   // Shared text-override regex patterns (used by both text model + image model)
   const textOverridePatterns = [
@@ -1222,87 +1269,186 @@ ${textReminder}`;
       img.src = dataURL;
     });
 
+  const generateTrainingDirections = async (topic, styleProfile, stylePatterns) => {
+    const fallback = dedupeTrainingVariations(FALLBACK_TRAINING_VARIATIONS, 6);
+
+    const planningPrompt = `You are planning diverse image training directions for a car drift game marketing agent.
+Topic: "${topic}"
+
+Current style profile:
+- Colors: ${styleProfile.preferredColors.join(", ")}
+- Composition: ${styleProfile.preferredComposition}
+- Arabic font style preference: ${styleProfile.arabicFont}
+- Learned patterns: ${stylePatterns || "none"}
+
+Task:
+- Create 6 visually distinct directions (NOT repetitive).
+- Each direction must differ clearly in camera angle, environment, lighting, and motion feeling.
+- Keep direction labels in Arabic (2-4 words).
+- Keep direction prompt prefixes in English only.
+- Do not include any text-on-image instructions.
+
+Return JSON only:
+{"directions":[{"label":"...", "prefix":"..."}, ...]}`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await fetch(TEXT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: planningPrompt }] }],
+          generationConfig: {
+            temperature: 0.95,
+            topP: 0.95,
+            maxOutputTokens: 900,
+          },
+        }),
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) throw new Error(`Training planning API ${response.status}`);
+      const data = await response.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const parsed = raw ? extractJSON(raw) : null;
+
+      const rawDirections = parsed?.directions || parsed?.variations || [];
+      const modelDirections = dedupeTrainingVariations(
+        rawDirections.map((d) => ({
+          label: d?.label || d?.name || "",
+          prefix: d?.prefix || d?.prompt || d?.direction || "",
+        })),
+        6,
+      );
+
+      const merged = dedupeTrainingVariations([...modelDirections, ...fallback], 6);
+      if (merged.length >= 4) return { directions: merged, source: "ai" };
+      return { directions: fallback, source: "fallback" };
+    } catch (err) {
+      clearTimeout(timeout);
+      console.warn("Training direction planning fallback:", err);
+      return { directions: fallback, source: "fallback" };
+    }
+  };
+
+  const handleOpenTrainingPreview = (index) => {
+    const item = trainingImages[index];
+    if (!item || item.status !== "done" || !item.image) return;
+    setTrainingPreviewIndex(index);
+  };
+
   const handleStartTraining = async () => {
     if (!trainingTopic.trim()) return;
+
     setIsTraining(true);
+    setIsPreparingTraining(true);
     setTrainingLiked(null);
     setTrainingToast("");
-    setTrainingImages(trainingVariations.map((v) => ({ image: null, prompt: "", label: v.label, status: "loading" })));
+    setTrainingPreviewIndex(null);
+    setTrainingPlanSource("");
 
-    const scoring = normalizeScoringEngine(agentMemory.scoringEngine);
-    const sp = deriveStyleProfileFromScoring(scoring, agentMemory.styleProfile);
-    const stylePatterns = (agentMemory.learnedPatterns || [])
-      .map((p) => {
-        const signal = scoring.patternScores[p.pattern]?.score ?? 0.5;
-        return { pattern: p.pattern, effective: (p.weight * 0.7) + (signal * 0.3) };
-      })
-      .sort((a, b) => b.effective - a.effective)
-      .slice(0, 6)
-      .map((p) => p.pattern)
-      .join(", ");
+    try {
+      const scoring = normalizeScoringEngine(agentMemory.scoringEngine);
+      const sp = deriveStyleProfileFromScoring(scoring, agentMemory.styleProfile);
+      const stylePatterns = (agentMemory.learnedPatterns || [])
+        .map((p) => {
+          const signal = scoring.patternScores[p.pattern]?.score ?? 0.5;
+          return { pattern: p.pattern, effective: (p.weight * 0.7) + (signal * 0.3) };
+        })
+        .sort((a, b) => b.effective - a.effective)
+        .slice(0, 6)
+        .map((p) => p.pattern)
+        .join(", ");
 
-    const basePrompt = `Hajwalah Corsa 2 racing game, ${trainingTopic.trim()}, color palette: ${sp.preferredColors.join(", ")}, composition: ${sp.preferredComposition}, ${stylePatterns}`;
+      const topic = trainingTopic.trim();
+      const { directions, source } = await generateTrainingDirections(topic, sp, stylePatterns);
+      setTrainingDirections(directions);
+      setTrainingPlanSource(source);
+      setTrainingImages(directions.map((v) => ({
+        image: null,
+        prompt: "",
+        label: v.label,
+        direction: v.prefix,
+        status: "loading",
+      })));
+      setIsPreparingTraining(false);
 
-    const textRuleBlock = `⛔ ABSOLUTE RULE — ZERO TEXT ON IMAGE ⛔
+      const basePrompt = `Hajwalah Corsa 2 racing game, ${topic}, color palette: ${sp.preferredColors.join(", ")}, composition: ${sp.preferredComposition}, ${stylePatterns}`;
+
+      const textRuleBlock = `⛔ ABSOLUTE RULE — ZERO TEXT ON IMAGE ⛔
 - DO NOT render any text, letters, words, numbers, or symbols
 - DO NOT add titles, hashtags, labels, captions, or watermarks
 - The output must be PURELY VISUAL with ZERO typography`;
 
-    // Build style ref inlineData parts (up to 3)
-    const refParts = [];
-    if (styleRefs.length > 0) {
-      for (const ref of styleRefs.slice(-3)) {
-        refParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
-      }
-    }
-
-    const promises = trainingVariations.map(async (variation) => {
-      const fullPrompt = `${textRuleBlock}\n\n${variation.prefix} ${basePrompt}`;
-      const parts = [...refParts, { text: fullPrompt }];
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60000);
-
-      try {
-        const response = await fetch(IMAGE_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-          }),
-        });
-        clearTimeout(timeout);
-
-        if (!response.ok) throw new Error(`API ${response.status}`);
-
-        const data = await response.json();
-        const candidate = data.candidates?.[0];
-        if (candidate?.finishReason && candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS") {
-          throw new Error(candidate.finishReason);
+      // Build style ref inlineData parts (up to 3)
+      const refParts = [];
+      if (styleRefs.length > 0) {
+        for (const ref of styleRefs.slice(-3)) {
+          refParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
         }
-        const imagePart = (candidate?.content?.parts || []).find((p) => p.inlineData);
-        if (!imagePart) throw new Error("No image returned");
-
-        const { mimeType, data: imgData } = imagePart.inlineData;
-        const dataURL = `data:${mimeType};base64,${imgData}`;
-        return { image: dataURL, prompt: fullPrompt, label: variation.label, status: "done" };
-      } catch (err) {
-        clearTimeout(timeout);
-        return { image: null, prompt: fullPrompt, label: variation.label, status: "error", error: err.message };
       }
-    });
 
-    // Update results progressively
-    promises.forEach((p, i) => {
-      p.then((result) => {
-        setTrainingImages((prev) => prev.map((item, idx) => idx === i ? result : item));
+      const promises = directions.map(async (variation, index) => {
+        const nonce = crypto.randomUUID().slice(0, 8);
+        const fullPrompt = `${textRuleBlock}
+
+VARIATION OBJECTIVE:
+- Variation #${index + 1}: ${variation.label}
+- Must be visually DISTINCT from other outputs in this training round
+- Primary direction: ${variation.prefix}
+- Uniqueness token: ${nonce}
+
+BASE STYLE CONTEXT:
+${basePrompt}`;
+
+        const parts = [...refParts, { text: fullPrompt }];
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
+
+        try {
+          const response = await fetch(IMAGE_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [{ parts }],
+              generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+            }),
+          });
+          clearTimeout(timeout);
+
+          if (!response.ok) throw new Error(`API ${response.status}`);
+          const data = await response.json();
+          const candidate = data.candidates?.[0];
+          if (candidate?.finishReason && candidate.finishReason !== "STOP" && candidate.finishReason !== "MAX_TOKENS") {
+            throw new Error(candidate.finishReason);
+          }
+          const imagePart = (candidate?.content?.parts || []).find((p) => p.inlineData);
+          if (!imagePart) throw new Error("No image returned");
+
+          const { mimeType, data: imgData } = imagePart.inlineData;
+          const dataURL = `data:${mimeType};base64,${imgData}`;
+          return { image: dataURL, prompt: fullPrompt, label: variation.label, direction: variation.prefix, status: "done" };
+        } catch (err) {
+          clearTimeout(timeout);
+          return { image: null, prompt: fullPrompt, label: variation.label, direction: variation.prefix, status: "error", error: err.message };
+        }
       });
-    });
 
-    await Promise.allSettled(promises);
-    setIsTraining(false);
+      // Update results progressively
+      promises.forEach((p, i) => {
+        p.then((result) => {
+          setTrainingImages((prev) => prev.map((item, idx) => idx === i ? result : item));
+        });
+      });
+
+      await Promise.allSettled(promises);
+    } finally {
+      setIsPreparingTraining(false);
+      setIsTraining(false);
+    }
   };
 
   const handleTrainingLike = async (index) => {
@@ -1467,14 +1613,6 @@ ${textReminder}`;
     { id: "tip", label: "نصيحة لعب", emoji: "💡", desc: "نصيحة أو حركة هجولة" },
     { id: "season", label: "موسم جديد", emoji: "🌟", desc: "إعلان موسم أو باتل باس" },
     { id: "collab", label: "تعاون", emoji: "🤝", desc: "شراكة أو تعاون مع براند" },
-  ];
-
-  const trainingVariations = [
-    { label: "إضاءة درامية", prefix: "Dramatic cinematic lighting, dark moody background, strong shadows and rim light," },
-    { label: "ألوان حية", prefix: "Vibrant saturated colors, high-energy action shot, motion blur on wheels," },
-    { label: "لقطة سينمائية", prefix: "Ultra-wide cinematic shot, dramatic perspective, epic scale composition," },
-    { label: "تفاصيل قريبة", prefix: "Extreme close-up detail shot, shallow depth of field, macro focus on car details," },
-    { label: "ستايل فني", prefix: "Stylized illustrated feel, bold graphic shapes, cel-shaded rendering style," },
   ];
 
   const rejectionReasons = [
@@ -1791,7 +1929,7 @@ ${textReminder}`;
   const renderGenerate = () => (
     <div style={{ animation: "fadeUp 0.6s ease", maxWidth: 800, margin: "0 auto", padding: "40px 20px" }}>
       <button
-        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setLastGenerationContext(null); setTrainingMode(false); setTrainingImages([]); setTrainingLiked(null); }}
+        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setLastGenerationContext(null); setTrainingMode(false); setTrainingImages([]); setTrainingDirections([]); setTrainingPlanSource(""); setTrainingLiked(null); setTrainingPreviewIndex(null); }}
         style={{
           background: "none",
           border: "none",
@@ -2001,7 +2139,14 @@ ${textReminder}`;
 
           {/* Training Mode Toggle */}
           <button
-            onClick={() => setTrainingMode(!trainingMode)}
+            onClick={() => {
+              if (trainingMode) {
+                setTrainingPreviewIndex(null);
+                setTrainingDirections([]);
+                setTrainingPlanSource("");
+              }
+              setTrainingMode(!trainingMode);
+            }}
             style={{
               width: "100%",
               marginTop: 12,
@@ -2056,7 +2201,7 @@ ${textReminder}`;
                 fontFamily: "'Tajawal', sans-serif",
                 direction: "rtl",
               }}>
-                أدخل موضوع وراح يتم توليد 5 صور بأنماط مختلفة — اختر المفضلة وراح يتعلم الوكيل من ذوقك
+                أدخل موضوع وراح نبني تلقائيًا اتجاهات بصرية متنوعة وفريدة (بدون مودات ثابتة) — اختر الأفضل والوكيل يتعلم مباشرة من اختيارك
               </p>
 
               <div style={{ display: "flex", gap: 12, marginBottom: 20, direction: "rtl" }}>
@@ -2098,16 +2243,55 @@ ${textReminder}`;
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {isTraining ? "⏳ جاري التوليد..." : "🚀 ابدأ التدريب"}
+                  {isPreparingTraining ? "🧠 تجهيز الاتجاهات..." : isTraining ? "⏳ جاري التوليد..." : "🚀 ابدأ التدريب"}
                 </button>
               </div>
+
+              {(trainingDirections.length > 0 || isPreparingTraining) && (
+                <div style={{
+                  marginBottom: 14,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  direction: "rtl",
+                }}>
+                  <span style={{
+                    fontSize: 13,
+                    color: PURPLE[700],
+                    fontFamily: "'Tajawal', sans-serif",
+                    background: PURPLE[50],
+                    border: `1px solid ${PURPLE[200]}`,
+                    borderRadius: 10,
+                    padding: "6px 12px",
+                  }}>
+                    {isPreparingTraining
+                      ? "جاري تخطيط اتجاهات مختلفة..."
+                      : `جاهز: ${trainingDirections.length} اتجاهات تدريبية متنوعة`}
+                  </span>
+                  {trainingPlanSource && !isPreparingTraining && (
+                    <span style={{
+                      fontSize: 12,
+                      color: trainingPlanSource === "ai" ? "#047857" : "#92400e",
+                      fontFamily: "'Tajawal', sans-serif",
+                      background: trainingPlanSource === "ai" ? "#ecfdf5" : "#fffbeb",
+                      border: `1px solid ${trainingPlanSource === "ai" ? "#bbf7d0" : "#fde68a"}`,
+                      borderRadius: 10,
+                      padding: "6px 10px",
+                    }}>
+                      {trainingPlanSource === "ai" ? "⚡ اتجاهات مولدة بالذكاء" : "🛟 تم استخدام خطة بديلة"}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Training Images Grid */}
               {trainingImages.length > 0 && (
                 <div style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: 12,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: 14,
                 }}>
                   {trainingImages.map((item, i) => (
                     <div key={i} style={{
@@ -2119,7 +2303,17 @@ ${textReminder}`;
                       boxShadow: trainingLiked === i ? "0 4px 20px rgba(245,158,11,0.3)" : "none",
                     }}>
                       {/* Image Area */}
-                      <div style={{ position: "relative", aspectRatio: "1", overflow: "hidden" }}>
+                      <div style={{
+                        position: "relative",
+                        minHeight: 190,
+                        maxHeight: 260,
+                        overflow: "hidden",
+                        background: "#0f0a1a",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 10,
+                      }}>
                         {item.status === "loading" && (
                           <div style={{
                             width: "100%",
@@ -2140,11 +2334,39 @@ ${textReminder}`;
                           </div>
                         )}
                         {item.status === "done" && item.image && (
-                          <img
-                            src={item.image}
-                            alt={item.label}
-                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                          />
+                          <>
+                            <img
+                              src={item.image}
+                              alt={item.label}
+                              onClick={() => handleOpenTrainingPreview(i)}
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "contain",
+                                display: "block",
+                                cursor: "zoom-in",
+                              }}
+                            />
+                            <button
+                              onClick={() => handleOpenTrainingPreview(i)}
+                              style={{
+                                position: "absolute",
+                                bottom: 8,
+                                left: 8,
+                                background: "rgba(15,10,26,0.8)",
+                                color: "white",
+                                border: "1px solid rgba(255,255,255,0.25)",
+                                borderRadius: 10,
+                                padding: "6px 10px",
+                                fontSize: 12,
+                                cursor: "zoom-in",
+                                fontFamily: "'Tajawal', sans-serif",
+                                backdropFilter: "blur(6px)",
+                              }}
+                            >
+                              🔍 عرض كامل
+                            </button>
+                          </>
                         )}
                         {item.status === "error" && (
                           <div style={{
@@ -2168,37 +2390,74 @@ ${textReminder}`;
                       {/* Label + Like Button */}
                       <div style={{
                         padding: "10px 12px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
                         direction: "rtl",
                       }}>
-                        <span style={{
+                        <div style={{
                           fontSize: 13,
-                          fontWeight: 600,
+                          fontWeight: 700,
                           color: PURPLE[800],
                           fontFamily: "'Tajawal', sans-serif",
+                          marginBottom: 5,
                         }}>
                           {item.label}
-                        </span>
-                        {item.status === "done" && item.image && (
+                        </div>
+                        {item.direction && (
+                          <div style={{
+                            fontSize: 11,
+                            color: "#64748b",
+                            fontFamily: "monospace",
+                            lineHeight: 1.5,
+                            marginBottom: 8,
+                            direction: "ltr",
+                            textAlign: "left",
+                            background: "white",
+                            border: `1px solid ${PURPLE[100]}`,
+                            borderRadius: 8,
+                            padding: "6px 8px",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}>
+                            {item.direction}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                           <button
-                            onClick={() => handleTrainingLike(i)}
-                            disabled={trainingLiked !== null || trainingLearning}
+                            onClick={() => item.status === "done" && item.image && handleOpenTrainingPreview(i)}
+                            disabled={item.status !== "done" || !item.image}
                             style={{
-                              background: trainingLiked === i ? "#f59e0b" : "transparent",
-                              border: `2px solid ${trainingLiked === i ? "#f59e0b" : PURPLE[200]}`,
+                              background: item.status === "done" && item.image ? "white" : "#e2e8f0",
+                              color: item.status === "done" && item.image ? PURPLE[700] : "#94a3b8",
+                              border: `1px solid ${item.status === "done" && item.image ? PURPLE[200] : "#cbd5e1"}`,
                               borderRadius: 10,
-                              padding: "6px 12px",
-                              cursor: trainingLiked !== null ? "default" : "pointer",
-                              fontSize: 16,
-                              transition: "all 0.2s",
-                              opacity: trainingLiked !== null && trainingLiked !== i ? 0.4 : 1,
+                              padding: "6px 10px",
+                              cursor: item.status === "done" && item.image ? "zoom-in" : "not-allowed",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              fontFamily: "'Tajawal', sans-serif",
                             }}
                           >
-                            {trainingLearning && trainingLiked === i ? "⏳" : "❤️"}
+                            🔎 تكبير
                           </button>
-                        )}
+                          {item.status === "done" && item.image && (
+                            <button
+                              onClick={() => handleTrainingLike(i)}
+                              disabled={trainingLiked !== null || trainingLearning}
+                              style={{
+                                background: trainingLiked === i ? "#f59e0b" : "transparent",
+                                border: `2px solid ${trainingLiked === i ? "#f59e0b" : PURPLE[200]}`,
+                                borderRadius: 10,
+                                padding: "6px 12px",
+                                cursor: trainingLiked !== null ? "default" : "pointer",
+                                fontSize: 16,
+                                transition: "all 0.2s",
+                                opacity: trainingLiked !== null && trainingLiked !== i ? 0.4 : 1,
+                              }}
+                            >
+                              {trainingLearning && trainingLiked === i ? "⏳" : "❤️"}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -2219,7 +2478,7 @@ ${textReminder}`;
                       minHeight: 160,
                       opacity: isTraining ? 0.5 : 1,
                     }}
-                  >
+                    >
                     <span style={{ fontSize: 32 }}>🔄</span>
                     <span style={{
                       fontSize: 14,
@@ -2228,8 +2487,88 @@ ${textReminder}`;
                       fontFamily: "'Tajawal', sans-serif",
                       marginTop: 8,
                     }}>
-                      جولة جديدة
+                      جولة جديدة مختلفة
                     </span>
+                  </div>
+                </div>
+              )}
+
+              {trainingPreviewIndex !== null && trainingImages[trainingPreviewIndex]?.image && (
+                <div
+                  onClick={() => setTrainingPreviewIndex(null)}
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    zIndex: 1200,
+                    background: "rgba(0,0,0,0.82)",
+                    backdropFilter: "blur(8px)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 20,
+                  }}
+                >
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      width: "min(1020px, 100%)",
+                      maxHeight: "92vh",
+                      background: "#0f0a1a",
+                      borderRadius: 18,
+                      border: `1px solid ${PURPLE[500]}`,
+                      boxShadow: "0 20px 80px rgba(0,0,0,0.45)",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 14px",
+                      background: "rgba(147,51,234,0.15)",
+                      borderBottom: `1px solid ${PURPLE[700]}`,
+                      direction: "rtl",
+                    }}>
+                      <div style={{ color: "white", fontFamily: "'Tajawal', sans-serif", fontWeight: 700, fontSize: 14 }}>
+                        {trainingImages[trainingPreviewIndex].label}
+                      </div>
+                      <button
+                        onClick={() => setTrainingPreviewIndex(null)}
+                        style={{
+                          background: "transparent",
+                          border: "1px solid rgba(255,255,255,0.3)",
+                          color: "white",
+                          borderRadius: 10,
+                          padding: "6px 10px",
+                          cursor: "pointer",
+                          fontFamily: "'Tajawal', sans-serif",
+                        }}
+                      >
+                        ✕ إغلاق
+                      </button>
+                    </div>
+
+                    <div style={{
+                      background: "#0f0a1a",
+                      padding: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minHeight: 300,
+                      maxHeight: "calc(92vh - 56px)",
+                    }}>
+                      <img
+                        src={trainingImages[trainingPreviewIndex].image}
+                        alt={trainingImages[trainingPreviewIndex].label}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          maxHeight: "calc(92vh - 90px)",
+                          objectFit: "contain",
+                          display: "block",
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               )}
