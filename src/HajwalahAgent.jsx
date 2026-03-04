@@ -554,23 +554,49 @@ ${rejections}
         .map((p) => `- ${p.pattern}`)
         .join("\n");
 
-      // ===== HARD CONSTRAINT: NO TEXT ON IMAGES =====
-      // Text/hashtags/watermarks are NEVER added unless user explicitly typed text in promptInput
-      const noTextBlock = `
+      // ===== EXPLICIT TEXT OVERRIDE DETECTION =====
+      // Detect user commands like "أضف نص: ..." or "Add text: ..."
+      const textOverridePatterns = [
+        /أضف (?:النص|نص|كتابة|عبارة)\s*:\s*(.+)/i,
+        /اكتب (?:على الصورة|النص|نص)\s*:\s*(.+)/i,
+        /add (?:the )?(?:following )?text\s*:\s*(.+)/i,
+        /write (?:on (?:the )?image)?\s*:\s*(.+)/i,
+        /text\s*:\s*(.+)/i,
+        /نص\s*:\s*(.+)/i,
+      ];
+      let userExplicitText = null;
+      const userInput = promptInput || "";
+      for (const rx of textOverridePatterns) {
+        const m = userInput.match(rx);
+        if (m) { userExplicitText = m[1].trim(); break; }
+      }
+
+      // Build text rule block
+      const textRuleBlock = userExplicitText
+        ? `
+✅ USER TEXT OVERRIDE — Render this EXACT text on the image:
+"${userExplicitText}"
+- Copy it letter-for-letter. Do NOT translate, summarize, or modify it.
+- Place it prominently using ${sp.arabicFont} style, positioned at ${sp.textPlacement}.
+- Besides this exact string, do NOT add any other text, labels, hashtags, or watermarks.`
+        : `
 ⛔⛔⛔ ABSOLUTE RULE — ZERO TEXT ON IMAGE ⛔⛔⛔
-- DO NOT render, write, draw, or overlay ANY text, letters, words, numbers, or symbols on the image
+- DO NOT render, write, draw, or overlay ANY text, letters, words, numbers, or symbols
 - DO NOT add titles, hashtags, labels, captions, or watermarks
 - DO NOT add Arabic text, English text, or any other language
 - DO NOT add branding bars, credit lines, or attribution text
-- The output must be a PURELY VISUAL image with ZERO typography
-- If you are tempted to add text: DON'T. Leave it blank.
+- The output must be PURELY VISUAL with ZERO typography
 - This rule is NON-NEGOTIABLE and overrides every other instruction
 ⛔⛔⛔ END ABSOLUTE RULE ⛔⛔⛔`;
 
-      const imagePromptText = hasStyleRefs
-        ? `${noTextBlock}
+      const textReminder = userExplicitText
+        ? `REMINDER: Render ONLY this exact text: "${userExplicitText}" — nothing else.`
+        : `REMINDER: The final image must contain ZERO text. Purely visual.`;
 
-Create a purely visual image (NO TEXT) for: "${postTitle}"
+      const imagePromptText = hasStyleRefs
+        ? `${textRuleBlock}
+
+Create an image for: "${postTitle}"
 
 STYLE PROFILE:
 - Color palette: ${sp.preferredColors.join(", ")}
@@ -588,8 +614,8 @@ REFERENCE IMAGES (style only):
 
 SCENE: ${baseImagePrompt}
 
-REMINDER: The final image must contain ZERO text. Purely visual.`
-        : `${noTextBlock}
+${textReminder}`
+        : `${textRuleBlock}
 
 ${baseImagePrompt}
 
@@ -601,7 +627,7 @@ STYLE PROFILE:
 LEARNED PATTERNS:
 ${stylePatterns}
 
-REMINDER: The final image must contain ZERO text. Purely visual.`;
+${textReminder}`;
 
       // Build multimodal parts: reference images (up to 3) + text prompt
       const imageParts = [];
