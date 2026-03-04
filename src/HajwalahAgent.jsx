@@ -472,10 +472,16 @@ ${rejections}
 1. عنوان جذاب (سطر واحد)
 2. نص البوست (2-3 أسطر بالعامية السعودية، يكون حماسي وجذاب)
 3. وصف تفصيلي للصورة المقترحة بالإنجليزي (image prompt):
-   - صف المشهد البصري فقط: السيارة، البيئة، الإضاءة، الدخان، الألوان
+   - صف المشهد البصري: السيارة، البيئة، الإضاءة، الدخان، الألوان
    - الألوان: ${sp.preferredColors.join(", ")}
    - التكوين: ${sp.preferredComposition}
-   - ⛔ لا تذكر أي نص أو كتابة في وصف الصورة — الصورة بصرية فقط بدون حروف أو كلمات
+${(() => {
+  const noTextKw = ["أضف نص", "أضف النص", "اكتب على", "اكتب نص", "add text", "write on", "text:", "نص:"];
+  const hasOverride = noTextKw.some((kw) => (promptInput || "").toLowerCase().includes(kw));
+  return hasOverride
+    ? "   - ✅ المستخدم طلب نص على الصورة — اذكر في الوصف إن الصورة تحتوي على النص المطلوب"
+    : "   - ⛔ لا تذكر أي نص أو كتابة في وصف الصورة — الصورة بصرية فقط بدون حروف أو كلمات";
+})()}
 4. هاشتاقات مناسبة (3-5)
 
 أجب بصيغة JSON فقط بدون أي نص إضافي:
@@ -590,6 +596,10 @@ ${rejections}
       for (const rx of textOverridePatterns) {
         const m = userInput.match(rx);
         if (m) { userExplicitText = m[1].trim(); break; }
+      }
+      console.log("[TextOverride] promptInput:", JSON.stringify(userInput), "| detected:", userExplicitText);
+      if (userExplicitText) {
+        addThought(`✍️ تم كشف نص مطلوب: "${userExplicitText}"`);
       }
 
       // Build text rule block
