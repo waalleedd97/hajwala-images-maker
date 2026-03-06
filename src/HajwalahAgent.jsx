@@ -2700,7 +2700,7 @@ Return JSON only:
               fontSize: 14,
               fontWeight: 700,
               fontFamily: "'Tajawal', sans-serif",
-              color: T.textPrimary,
+              color: T.text,
             }}>
               نص على الصورة
             </span>
@@ -3491,7 +3491,7 @@ Return JSON only:
                         borderRadius: 8,
                         border: `1px solid ${T.cardBorder}`,
                         background: T.inputBg,
-                        color: T.textPrimary,
+                        color: T.text,
                         fontSize: 14,
                         fontFamily: "'Tajawal', sans-serif",
                         direction: "rtl",
@@ -3509,7 +3509,7 @@ Return JSON only:
                         borderRadius: 8,
                         border: `1px solid ${T.cardBorder}`,
                         background: T.inputBg,
-                        color: T.textPrimary,
+                        color: T.text,
                         fontSize: 14,
                         fontFamily: "'Tajawal', sans-serif",
                         direction: "rtl",
@@ -3564,7 +3564,7 @@ Return JSON only:
                           borderRadius: 12,
                           border: `1px solid ${PURPLE[600]}`,
                           background: T.softBg,
-                          color: T.textPrimary,
+                          color: T.text,
                           fontSize: 14,
                           fontWeight: 700,
                           fontFamily: "'Tajawal', sans-serif",
@@ -3581,7 +3581,7 @@ Return JSON only:
                           borderRadius: 12,
                           border: `1px solid ${PURPLE[600]}`,
                           background: T.softBg,
-                          color: T.textPrimary,
+                          color: T.text,
                           fontSize: 14,
                           fontWeight: 700,
                           fontFamily: "'Tajawal', sans-serif",
@@ -3624,7 +3624,7 @@ Return JSON only:
                           borderRadius: 10,
                           border: `1px solid ${T.cardBorder}`,
                           background: T.inputBg,
-                          color: T.textPrimary,
+                          color: T.text,
                           fontSize: 14,
                           fontFamily: "'Tajawal', sans-serif",
                           resize: "vertical",
@@ -3684,7 +3684,7 @@ Return JSON only:
                       <div style={{
                         fontSize: 14,
                         fontWeight: 700,
-                        color: T.textPrimary,
+                        color: T.text,
                         fontFamily: "'Tajawal', sans-serif",
                       }}>
                         {imageRefinementMode === "edit" ? "جاري تعديل الصورة..." : "جاري توليد صورة جديدة..."}
