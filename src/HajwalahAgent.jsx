@@ -2613,79 +2613,103 @@ Return JSON only:
         </div>
       </div>
 
-      {/* Agent Confidence Meter */}
+      {/* Prompt Comparison Card */}
       <div style={{
-        maxWidth: 700,
+        maxWidth: 900,
         margin: "0 auto 48px",
         padding: "0 20px",
       }}>
         <div style={{
           background: T.cardBg,
           borderRadius: 24,
-          padding: 32,
+          padding: 28,
           border: `1px solid ${T.cardBorder}`,
           boxShadow: darkMode ? "0 4px 24px rgba(0,0,0,0.2)" : "0 4px 24px rgba(147,51,234,0.06)",
+          direction: "rtl",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-            <Icon3D type="star" size={40} />
-            <div>
-              <h3 style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: "'Tajawal', sans-serif" }}>
-                مستوى ثقة الوكيل
-              </h3>
-              <p style={{ fontSize: 13, color: T.textMuted, fontFamily: "'Tajawal', sans-serif" }}>
-                كل ما زادت التفاعلات، زادت الثقة
-              </p>
+          <h3 style={{
+            fontSize: 20,
+            fontWeight: 800,
+            color: T.text,
+            fontFamily: "'Tajawal', sans-serif",
+            marginBottom: 20,
+            textAlign: "center",
+          }}>
+            كيف تكتب برومبت يفهمه الوكيل؟
+          </h3>
+
+          <div style={{ display: "flex", gap: 0, marginBottom: 12 }}>
+            <div style={{ flex: 1, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#ef4444", fontFamily: "'Tajawal', sans-serif", padding: "8px 0" }}>
+              ❌ برومبت ضعيف
+            </div>
+            <div style={{ width: 1 }} />
+            <div style={{ flex: 1, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#22c55e", fontFamily: "'Tajawal', sans-serif", padding: "8px 0" }}>
+              ✅ برومبت قوي
             </div>
           </div>
 
-          <div style={{
-            background: T.softBg,
-            borderRadius: 12,
-            height: 24,
-            overflow: "hidden",
-            marginBottom: 12,
-          }}>
-            <div style={{
-              background: `linear-gradient(90deg, ${PURPLE[400]}, ${PURPLE[600]})`,
-              height: "100%",
-              width: `${agentMemory.styleProfile.confidence * 100}%`,
+          {[
+            {
+              weak: "سوّي بوست حلو عن اللعبة",
+              strong: "بوست يعلن عن تحديث جديد فيه سيارة كامري 2024 تتفحط في شارع الرياض بالليل مع دخان كثيف",
+            },
+            {
+              weak: "بوست تسويقي",
+              strong: "بوست حماسي يخاطب شباب السعودية يقول إن التحديث الجديد فيه 3 سيارات جديدة ويحمسهم يحملون اللعبة",
+            },
+            {
+              weak: "صورة سيارة",
+              strong: "صورة درفت من الخلف لسيارة دودج تشارجر سوداء على طريق صحراوي وقت الغروب مع غبار يتطاير",
+            },
+            {
+              weak: "بوست مسابقة",
+              strong: "بوست يعلن عن تحدي أسبوعي: أسرع لفة في حلبة جدة — الفائز يحصل على سيارة حصرية داخل اللعبة",
+            },
+          ].map((row, i) => (
+            <div key={i} style={{
+              display: "flex",
+              gap: 0,
+              marginBottom: i < 3 ? 8 : 0,
               borderRadius: 12,
-              transition: "width 0.8s ease",
-            }} />
-          </div>
-
-          <div style={{
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 12,
-            color: T.textMuted,
-            fontFamily: "'Tajawal', sans-serif",
-          }}>
-            <span>مبتدئ 🌱</span>
-            <span>متوسط 📈</span>
-            <span>متقدم 🎯</span>
-            <span>خبير 🏆</span>
-          </div>
-
-          <div style={{
-            marginTop: 20,
-            padding: 16,
-            background: T.softBg,
-            borderRadius: 16,
-            fontSize: 14,
-            color: T.tagText,
-            lineHeight: 1.8,
-            fontFamily: "'Tajawal', sans-serif",
-          }}>
-            <strong>💡 حالة الوكيل:</strong>{" "}
-            {agentMemory.styleProfile.confidence < 0.3
-              ? "الوكيل لسا يتعلم ستايلك. استمر بالتفاعل عشان يفهمك أكثر!"
-              : agentMemory.styleProfile.confidence < 0.6
-              ? "الوكيل بدأ يفهم ذوقك. النتائج بتتحسن قريب!"
-              : agentMemory.styleProfile.confidence < 0.85
-              ? "الوكيل صار يعرف ستايلك بشكل ممتاز. الصور بتعجبك أكثر!"
-              : "الوكيل خبير بستايلك! يقدر يسوي بوستات بدون توجيه تقريباً 🔥"}
-          </div>
+              overflow: "hidden",
+              border: `1px solid ${T.cardBorder}`,
+            }}>
+              <div style={{
+                flex: 1,
+                padding: "12px 14px",
+                background: darkMode ? "rgba(239,68,68,0.08)" : "rgba(239,68,68,0.06)",
+                borderLeft: `1px solid ${T.cardBorder}`,
+              }}>
+                <p style={{
+                  fontSize: 13,
+                  color: darkMode ? "#fca5a5" : "#b91c1c",
+                  lineHeight: 1.7,
+                  fontFamily: "monospace, 'Tajawal'",
+                  direction: "rtl",
+                  margin: 0,
+                }}>"{row.weak}"</p>
+              </div>
+              <div style={{
+                width: 2,
+                background: T.cardBorder,
+                flexShrink: 0,
+              }} />
+              <div style={{
+                flex: 1,
+                padding: "12px 14px",
+                background: darkMode ? "rgba(34,197,94,0.08)" : "rgba(34,197,94,0.06)",
+              }}>
+                <p style={{
+                  fontSize: 13,
+                  color: darkMode ? "#86efac" : "#15803d",
+                  lineHeight: 1.7,
+                  fontFamily: "monospace, 'Tajawal'",
+                  direction: "rtl",
+                  margin: 0,
+                }}>"{row.strong}"</p>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
