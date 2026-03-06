@@ -1570,7 +1570,15 @@ Generate a completely fresh interpretation — do NOT reuse the previous image c
         const parts = data.candidates?.[0]?.content?.parts || [];
         const imgPart = parts.find((p) => p.inlineData);
         if (imgPart) {
-          setGeneratedImage(`data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`);
+          const rawBase64 = `data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`;
+          rawImageRef.current = rawBase64;
+          let finalImage = rawBase64;
+          if (textOverlayEnabled) {
+            try {
+              finalImage = await overlayTextOnImage(rawBase64, overlayTitle, overlayCta, overlayFontSize / 100);
+            } catch {}
+          }
+          setGeneratedImage(finalImage);
           setLastGenerationContext((prev) => ({ ...prev, finalImagePrompt: correctedPrompt }));
         } else {
           setImageError("لم يتم توليد صورة جديدة");
