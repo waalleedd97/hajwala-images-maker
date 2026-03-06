@@ -910,6 +910,7 @@ export default function HajwalahAgent() {
   // Canvas-based text overlay for generated images
   const overlayTextOnImage = (base64Image, title, ctaText) =>
     new Promise((resolve) => {
+      console.log("overlayTextOnImage called", title, ctaText);
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
@@ -1253,8 +1254,17 @@ ${textInstruction}
         ? `\nPREVIOUS IMAGE CORRECTIONS (apply these lessons to every future image):\n${imageCorrections.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n`
         : "";
 
+      const cleanBgInstruction = `IMPORTANT: Generate a CLEAN background scene only.
+- Do NOT draw any text
+- Do NOT draw any dark rectangles, boxes, panels, or placeholders
+- Do NOT leave any blank areas for text
+- Fill the entire image with the visual scene
+- The image will have text added on top of it programmatically — your job is ONLY the background scene
+`;
+
       const imagePromptText = hasStyleRefs
-        ? `CRITICAL: Match the visual style of the provided reference images FIRST.
+        ? `${cleanBgInstruction}
+CRITICAL: Match the visual style of the provided reference images FIRST.
 The reference images show the game's actual aesthetic: realistic Saudi streets,
 daylight/natural lighting, real road environments.
 Learned patterns below are suggestions only — NEVER apply them if they contradict the reference image style.
@@ -1280,7 +1290,8 @@ ${stylePatterns}
 SCENE: ${sceneBlock}
 
 ${textReminder}`
-        : `${textRuleBlock}
+        : `${cleanBgInstruction}
+${textRuleBlock}
 
 ${sceneBlock}
 
