@@ -4074,6 +4074,65 @@ Return JSON only:
         </div>
       </div>
 
+      {/* Hard Rules */}
+      <div style={{
+        background: T.cardBg,
+        borderRadius: 24,
+        padding: 28,
+        marginBottom: 20,
+        border: `1px solid ${darkMode ? "#92400e" : "#fed7aa"}`,
+        boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(234,88,12,0.06)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <h3 style={{
+            fontSize: 18,
+            fontWeight: 700,
+            color: T.text,
+            fontFamily: "'Tajawal', sans-serif",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            margin: 0,
+          }}>
+            <span>🔒</span> القواعد الصارمة الدائمة
+          </h3>
+          <span title="هذه القواعد مدمجة في كل طلب توليد صورة تلقائياً" style={{ cursor: "help", fontSize: 16 }}>ℹ️</span>
+        </div>
+        {[
+          "كل صورة يجب أن تحتوي على سيارة واضحة وبارزة في المقدمة",
+          "لا توجد مستطيلات أو صناديق داكنة أو أماكن محجوزة للنص",
+          "الصورة خلفية نظيفة فقط — النص يُضاف برمجياً",
+        ].map((rule, i) => (
+          <div key={i} style={{
+            padding: "12px 14px",
+            borderRadius: 12,
+            border: `1px solid ${darkMode ? "#92400e" : "#fdba74"}`,
+            background: darkMode ? "rgba(146,64,14,0.12)" : "#fff7ed",
+            marginBottom: 8,
+            direction: "rtl",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14 }}>🔒</span>
+              <span style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: T.text,
+                fontFamily: "'Tajawal', sans-serif",
+              }}>{rule}</span>
+            </div>
+            <div style={{
+              fontSize: 11,
+              color: T.textMuted,
+              fontFamily: "'Tajawal', sans-serif",
+              marginTop: 4,
+              marginRight: 22,
+            }}>
+              قاعدة نظام — غير قابلة للتعديل
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Style Profile */}
       <div style={{
         background: T.cardBg,
