@@ -800,6 +800,7 @@ export default function HajwalahAgent() {
   const [imageRefinementMode, setImageRefinementMode] = useState(null); // "replace" | "edit" | null
   const [imageRefinementComment, setImageRefinementComment] = useState("");
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
+  const [textOverlayEnabled, setTextOverlayEnabled] = useState(true);
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -1020,24 +1021,7 @@ export default function HajwalahAgent() {
   }, [trainingPreviewIndex]);
 
   // Shared text-override regex patterns (used by both text model + image model)
-  const textOverridePatterns = [
-    /أضف (?:النص|نص|كتابة|عبارة)\s*[:\u061B]?\s*(.+)/i,
-    /اكتب (?:على الصورة|النص|نص)\s*[:\u061B]?\s*(.+)/i,
-    /add (?:the )?(?:following )?text\s*[:\u061B]?\s*(.+)/i,
-    /write (?:on (?:the )?image)?\s*[:\u061B]?\s*(.+)/i,
-    /text\s*[:\u061B]\s*(.+)/i,
-    /نص\s*[:\u061B]\s*(.+)/i,
-  ];
-
-  const detectTextOverride = (input) => {
-    for (const rx of textOverridePatterns) {
-      const m = (input || "").match(rx);
-      if (m) return m[1].trim();
-    }
-    return null;
-  };
-
-  const deriveGenerationStrategy = (userExplicitText) => {
+  const deriveGenerationStrategy = () => {
     const scoring = normalizeScoringEngine(agentMemory.scoringEngine);
     const styleProfile = deriveStyleProfileFromScoring(scoring, agentMemory.styleProfile);
     const patternScores = scoring.patternScores || {};
@@ -1055,11 +1039,11 @@ export default function HajwalahAgent() {
       scoring,
       styleProfile,
       selectedPatterns,
-      textPolicy: userExplicitText ? "exact-text" : "no-text",
+      textPolicy: textOverlayEnabled ? "with-text" : "no-text",
     };
   };
 
-  const buildAgentPrompt = (userExplicitText, strategy) => {
+  const buildAgentPrompt = (strategy) => {
     const postType = postTypes.find((p) => p.id === selectedPostType);
     const patterns = strategy.selectedPatterns.map((p) => {
       const sourceTag = p.source === "image-analysis" ? " [من صورة]" : p.source === "manual" ? " [يدوي]" : "";
@@ -1076,9 +1060,7 @@ export default function HajwalahAgent() {
     const textPolicyScore = strategy.scoring.textPolicyScores[strategy.textPolicy]?.score ?? 0.5;
     const acceptanceRate = Math.round((strategy.scoring.acceptanceRate || 0) * 100);
 
-    const textInstruction = userExplicitText
-      ? `   - ✅ المستخدم طلب نص على الصورة — اذكر في الوصف إن الصورة تحتوي على النص المطلوب: "${userExplicitText}"`
-      : "   - ⛔ لا تذكر أي نص أو كتابة في وصف الصورة — الصورة بصرية فقط بدون حروف أو كلمات";
+    const textInstruction = "   - ⛔ لا تذكر أي نص أو كتابة في وصف الصورة — الصورة بصرية فقط بدون حروف أو كلمات";
 
     return `أنت وكيل تسويق ذكي متخصص في لعبة "هجولة كورسا ٢" — لعبة تفحيط وسيارات عربية سعودية.
 
@@ -1153,14 +1135,8 @@ ${textInstruction}
       addThought("🎨 بناء البرومبت بناءً على الأنماط المتعلمة...");
 
       // Detect text override ONCE — shared by text model + image model
-      const userExplicitText = detectTextOverride(promptInput);
-      console.log("[TextOverride] promptInput:", JSON.stringify(promptInput || ""), "| detected:", userExplicitText);
-      if (userExplicitText) {
-        addThought(`✍️ تم كشف نص مطلوب: "${userExplicitText}"`);
-      }
-
-      const generationStrategy = deriveGenerationStrategy(userExplicitText);
-      const prompt = buildAgentPrompt(userExplicitText, generationStrategy);
+      const generationStrategy = deriveGenerationStrategy();
+      const prompt = buildAgentPrompt(generationStrategy);
       addThought("🤔 الوكيل يفكّر ويحلل قبل الكتابة...");
       addThought("📡 إرسال البرومبت إلى Claude Sonnet...");
 
@@ -1316,7 +1292,7 @@ ${textReminder}`;
         usedColors: sp.preferredColors,
         usedPatterns: usedPatternNames,
         hasStyleRefs,
-        explicitText: Boolean(userExplicitText),
+        textOverlay: textOverlayEnabled,
         finalImagePrompt: imagePromptText,
         timestamp: Date.now(),
       });
@@ -1332,8 +1308,7 @@ ${textReminder}`;
       }
       imageParts.push({ text: imagePromptText });
 
-      console.log("[DEBUG-IMG] userExplicitText:", JSON.stringify(userExplicitText));
-      console.log("[DEBUG-IMG] textRuleBlock:", textRuleBlock);
+      console.log("[DEBUG-IMG] textOverlayEnabled:", textOverlayEnabled);
       console.log("[DEBUG-IMG] FULL imagePromptText:", imagePromptText);
 
       const imageController = new AbortController();
@@ -1370,11 +1345,14 @@ ${textReminder}`;
               const { mimeType, data } = imagePart.inlineData;
               let finalImage = `data:${mimeType};base64,${data}`;
 
-              // Canvas text overlay when user requested text on the image
-              if (userExplicitText) {
+              // Canvas text overlay when toggle is enabled
+              if (textOverlayEnabled && content) {
                 addThought("✍️ إضافة النص على الصورة بتقنية Canvas...");
                 try {
-                  finalImage = await overlayTextOnImage(finalImage, userExplicitText, postTitle);
+                  const overlayTitle = content.title || "";
+                  const bodyLines = (content.body || "").split("\n").filter((l) => l.trim());
+                  const overlayCtaText = bodyLines.length > 0 ? bodyLines[bodyLines.length - 1].trim() : "شارك الآن 🎮";
+                  finalImage = await overlayTextOnImage(finalImage, overlayTitle, overlayCtaText);
                 } catch (overlayErr) {
                   console.warn("[TextOverlay] error:", overlayErr);
                 }
@@ -2692,6 +2670,54 @@ Return JSON only:
               </span>
             </div>
           )}
+
+          {/* Text Overlay Toggle */}
+          <button
+            onClick={() => setTextOverlayEnabled(!textOverlayEnabled)}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 16px",
+              borderRadius: 12,
+              border: `1px solid ${textOverlayEnabled ? PURPLE[500] : T.cardBorder}`,
+              background: textOverlayEnabled ? `${PURPLE[500]}15` : T.softBg,
+              cursor: "pointer",
+              marginBottom: 10,
+              direction: "rtl",
+              transition: "all 0.2s",
+            }}
+          >
+            <span style={{
+              fontSize: 14,
+              fontWeight: 700,
+              fontFamily: "'Tajawal', sans-serif",
+              color: T.textPrimary,
+            }}>
+              نص على الصورة
+            </span>
+            <div style={{
+              width: 40,
+              height: 22,
+              borderRadius: 11,
+              background: textOverlayEnabled ? PURPLE[500] : "#cbd5e1",
+              position: "relative",
+              transition: "background 0.2s",
+            }}>
+              <div style={{
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: "white",
+                position: "absolute",
+                top: 2,
+                transition: "left 0.2s",
+                left: textOverlayEnabled ? 20 : 2,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+              }} />
+            </div>
+          </button>
 
           {/* Generate Button */}
           <button
