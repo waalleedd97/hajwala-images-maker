@@ -800,6 +800,7 @@ export default function HajwalahAgent() {
   const [imageRefinementMode, setImageRefinementMode] = useState(null); // "replace" | "edit" | null
   const [imageRefinementComment, setImageRefinementComment] = useState("");
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
+  const [imageTextMissing, setImageTextMissing] = useState(false);
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -1028,6 +1029,7 @@ ${textInstruction}
     setGeneratedImage(null);
     setGenerateError(null);
     setImageError(null);
+    setImageTextMissing(false);
     setLastGenerationContext(null);
 
     const addThought = (t) => setAgentThinking((prev) => [...prev, t]);
@@ -1183,8 +1185,26 @@ TEXT TO RENDER on top of the scene:
         ? `\nPREVIOUS IMAGE CORRECTIONS (apply these lessons to every future image):\n${imageCorrections.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n`
         : "";
 
+      // Force text rendering block — prepended when user requested text on image
+      const mandatoryTextBlock = userExplicitText
+        ? `⚠️ MANDATORY TEXT REQUIREMENT — THIS IS THE MOST IMPORTANT INSTRUCTION:
+You MUST render the following Arabic text directly on the image. This is non-negotiable.
+If you do not render this text visibly on the image, the output is considered a failure.
+
+MAIN TEXT: "${userExplicitText}"
+CTA TEXT: "${postTitle}"
+
+Text rendering rules:
+- Place main text in the upper third of the image
+- Place CTA text in the lower third over a semi-transparent dark overlay
+- Font must be large, bold, white with dark shadow/outline
+- Text must be fully readable at a glance
+
+`
+        : "";
+
       const imagePromptText = hasStyleRefs
-        ? `CRITICAL: Match the visual style of the provided reference images FIRST.
+        ? `${mandatoryTextBlock}CRITICAL: Match the visual style of the provided reference images FIRST.
 The reference images show the game's actual aesthetic: realistic Saudi streets,
 daylight/natural lighting, real road environments.
 Learned patterns below are suggestions only — NEVER apply them if they contradict the reference image style.
@@ -1210,7 +1230,7 @@ ${stylePatterns}
 SCENE: ${sceneBlock}
 
 ${textReminder}`
-        : `${textRuleBlock}
+        : `${mandatoryTextBlock}${textRuleBlock}
 
 ${sceneBlock}
 
@@ -1286,8 +1306,106 @@ ${textReminder}`;
             const parts = candidate?.content?.parts || [];
             const imagePart = parts.find((p) => p.inlineData);
             if (imagePart) {
-              const { mimeType, data } = imagePart.inlineData;
-              setGeneratedImage(`data:${mimeType};base64,${data}`);
+              let finalMime = imagePart.inlineData.mimeType;
+              let finalData = imagePart.inlineData.data;
+              setImageTextMissing(false);
+
+              // Text validation: if user requested text, verify it rendered
+              if (userExplicitText) {
+                addThought("🔍 التحقق من ظهور النص على الصورة...");
+                try {
+                  const validateResp = await fetch(ANTHROPIC_URL, {
+                    method: "POST",
+                    headers: ANTHROPIC_HEADERS,
+                    body: JSON.stringify({
+                      model: "claude-sonnet-4-6",
+                      max_tokens: 10,
+                      messages: [{
+                        role: "user",
+                        content: [
+                          { type: "image", source: { type: "base64", media_type: finalMime, data: finalData } },
+                          { type: "text", text: "Look at this image. Does it contain visible Arabic text? Reply with only: YES or NO" },
+                        ],
+                      }],
+                    }),
+                  });
+                  const validateData = await validateResp.json();
+                  const answer = (validateData.content?.[0]?.text || "").trim().toUpperCase();
+                  console.log("[TextValidation] answer:", answer);
+
+                  if (answer.includes("NO")) {
+                    addThought("⚠️ النص لم يظهر — إعادة التوليد بتأكيد أقوى...");
+
+                    // Retry with stronger instruction
+                    const retryPrompt = `CRITICAL FAILURE: Previous attempt had no text. You MUST render Arabic text on this image.\n\n${imagePromptText}`;
+                    const retryParts = [];
+                    if (hasStyleRefs) {
+                      for (const ref of styleRefs.slice(-3)) {
+                        retryParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
+                      }
+                    }
+                    retryParts.push({ text: retryPrompt });
+
+                    const retryController = new AbortController();
+                    const retryTimeout = setTimeout(() => retryController.abort(), 120000);
+                    const retryResp = await fetch(IMAGE_URL, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      signal: retryController.signal,
+                      body: JSON.stringify({
+                        contents: [{ parts: retryParts }],
+                        generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+                      }),
+                    });
+                    clearTimeout(retryTimeout);
+
+                    if (retryResp.ok) {
+                      const retryData = await retryResp.json();
+                      const retryImgPart = retryData.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
+                      if (retryImgPart) {
+                        finalMime = retryImgPart.inlineData.mimeType;
+                        finalData = retryImgPart.inlineData.data;
+
+                        // Validate retry
+                        try {
+                          const v2Resp = await fetch(ANTHROPIC_URL, {
+                            method: "POST",
+                            headers: ANTHROPIC_HEADERS,
+                            body: JSON.stringify({
+                              model: "claude-sonnet-4-6",
+                              max_tokens: 10,
+                              messages: [{
+                                role: "user",
+                                content: [
+                                  { type: "image", source: { type: "base64", media_type: finalMime, data: finalData } },
+                                  { type: "text", text: "Look at this image. Does it contain visible Arabic text? Reply with only: YES or NO" },
+                                ],
+                              }],
+                            }),
+                          });
+                          const v2Data = await v2Resp.json();
+                          const v2Answer = (v2Data.content?.[0]?.text || "").trim().toUpperCase();
+                          if (v2Answer.includes("NO")) {
+                            setImageTextMissing(true);
+                            addThought("⚠️ النص لم يظهر حتى بعد الإعادة");
+                          } else {
+                            addThought("✅ النص ظهر بنجاح في المحاولة الثانية!");
+                          }
+                        } catch {
+                          // If validation fails, show the image anyway
+                        }
+                      }
+                    }
+                  } else {
+                    addThought("✅ النص موجود على الصورة!");
+                  }
+                } catch (valErr) {
+                  console.warn("[TextValidation] error:", valErr);
+                  // If validation fails, proceed without blocking
+                }
+              }
+
+              setGeneratedImage(`data:${finalMime};base64,${finalData}`);
               addThought("✅ تم توليد الصورة بنجاح!");
             } else {
               const textParts = parts.filter((p) => p.text).map((p) => p.text).join(" ");
@@ -3338,6 +3456,24 @@ Return JSON only:
                   }}>
                     Nano Banana 2 — Hajwalah Agent v{agentLevel}.{agentMemory.totalInteractions}
                   </div>
+                  {imageTextMissing && (
+                    <div style={{
+                      position: "absolute",
+                      top: 12,
+                      right: 12,
+                      fontSize: 12,
+                      color: "#fbbf24",
+                      fontFamily: "'Tajawal', sans-serif",
+                      fontWeight: 700,
+                      background: "rgba(0,0,0,0.7)",
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      backdropFilter: "blur(8px)",
+                      direction: "rtl",
+                    }}>
+                      النص لم يظهر على الصورة — جرب التعديل
+                    </div>
+                  )}
                 </div>
               )}
 
