@@ -801,6 +801,9 @@ export default function HajwalahAgent() {
   const [imageRefinementComment, setImageRefinementComment] = useState("");
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
   const [textOverlayEnabled, setTextOverlayEnabled] = useState(true);
+  const [overlayTitle, setOverlayTitle] = useState("");
+  const [overlayCta, setOverlayCta] = useState("");
+  const rawImageRef = useRef(null); // stores pre-overlay base64
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -1343,16 +1346,20 @@ ${textReminder}`;
             const imagePart = parts.find((p) => p.inlineData);
             if (imagePart) {
               const { mimeType, data } = imagePart.inlineData;
-              let finalImage = `data:${mimeType};base64,${data}`;
+              const rawBase64 = `data:${mimeType};base64,${data}`;
+              rawImageRef.current = rawBase64;
+              let finalImage = rawBase64;
 
               // Canvas text overlay when toggle is enabled
               if (textOverlayEnabled && content) {
                 addThought("✍️ إضافة النص على الصورة بتقنية Canvas...");
                 try {
-                  const overlayTitle = content.title || "";
+                  const title = content.title || "";
                   const bodyLines = (content.body || "").split("\n").filter((l) => l.trim());
-                  const overlayCtaText = bodyLines.length > 0 ? bodyLines[bodyLines.length - 1].trim() : "شارك الآن 🎮";
-                  finalImage = await overlayTextOnImage(finalImage, overlayTitle, overlayCtaText);
+                  const cta = bodyLines.length > 0 ? bodyLines[bodyLines.length - 1].trim() : "شارك الآن 🎮";
+                  setOverlayTitle(title);
+                  setOverlayCta(cta);
+                  finalImage = await overlayTextOnImage(rawBase64, title, cta);
                 } catch (overlayErr) {
                   console.warn("[TextOverlay] error:", overlayErr);
                 }
@@ -3457,6 +3464,83 @@ Return JSON only:
                   }}>
                     Nano Banana 2 — Hajwalah Agent v{agentLevel}.{agentMemory.totalInteractions}
                   </div>
+                </div>
+              )}
+
+              {/* Text Overlay Editor */}
+              {generatedImage && textOverlayEnabled && !feedbackGiven && (
+                <div style={{
+                  marginTop: 12,
+                  background: T.softBg,
+                  border: `1px solid ${T.cardBorder}`,
+                  borderRadius: 16,
+                  padding: 14,
+                  direction: "rtl",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary, fontFamily: "'Tajawal', sans-serif", minWidth: 55 }}>العنوان</label>
+                    <input
+                      value={overlayTitle}
+                      onChange={(e) => setOverlayTitle(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: `1px solid ${T.cardBorder}`,
+                        background: T.inputBg,
+                        color: T.textPrimary,
+                        fontSize: 14,
+                        fontFamily: "'Tajawal', sans-serif",
+                        direction: "rtl",
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary, fontFamily: "'Tajawal', sans-serif", minWidth: 55 }}>نص الدعوة</label>
+                    <input
+                      value={overlayCta}
+                      onChange={(e) => setOverlayCta(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: `1px solid ${T.cardBorder}`,
+                        background: T.inputBg,
+                        color: T.textPrimary,
+                        fontSize: 14,
+                        fontFamily: "'Tajawal', sans-serif",
+                        direction: "rtl",
+                      }}
+                    />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!rawImageRef.current) return;
+                      try {
+                        const updated = await overlayTextOnImage(rawImageRef.current, overlayTitle, overlayCta);
+                        setGeneratedImage(updated);
+                      } catch (err) {
+                        console.warn("[TextOverlay] update error:", err);
+                      }
+                    }}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: `linear-gradient(135deg, ${PURPLE[600]}, ${PURPLE[500]})`,
+                      color: "white",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      fontFamily: "'Tajawal', sans-serif",
+                      cursor: "pointer",
+                      alignSelf: "flex-start",
+                    }}
+                  >
+                    تحديث النص على الصورة
+                  </button>
                 </div>
               )}
 
