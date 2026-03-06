@@ -1031,9 +1031,7 @@ export default function HajwalahAgent() {
         if (ctaText) {
           const fontSize = Math.round(40 * s);
           const ctaFont = `bold ${fontSize}px 'Tajawal', sans-serif`;
-          const arrowText = " →";
-          const ctaWithArrow = ctaText + arrowText;
-          const ctaLines = wrapText(ctaWithArrow, ctaFont, maxTextW);
+          const ctaLines = wrapText(ctaText, ctaFont, maxTextW);
           ctx.font = ctaFont;
           const lineH = Math.round(fontSize * 1.4);
           const totalTextH = ctaLines.length * lineH;
