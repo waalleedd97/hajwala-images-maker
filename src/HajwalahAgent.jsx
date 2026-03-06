@@ -803,7 +803,9 @@ export default function HajwalahAgent() {
   const [textOverlayEnabled, setTextOverlayEnabled] = useState(true);
   const [overlayTitle, setOverlayTitle] = useState("");
   const [overlayCta, setOverlayCta] = useState("");
+  const [overlayFontSize, setOverlayFontSize] = useState(100);
   const rawImageRef = useRef(null); // stores pre-overlay base64
+  const fontSizeDebounceRef = useRef(null);
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -912,9 +914,9 @@ export default function HajwalahAgent() {
   }, []);
 
   // Canvas-based text overlay for generated images
-  const overlayTextOnImage = (base64Image, title, ctaText) =>
+  const overlayTextOnImage = (base64Image, title, ctaText, fontScale = 1) =>
     new Promise((resolve) => {
-      console.log("overlayTextOnImage called", title, ctaText);
+      console.log("overlayTextOnImage called", title, ctaText, "fontScale:", fontScale);
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
@@ -974,7 +976,7 @@ export default function HajwalahAgent() {
 
         // Title pill (top zone)
         if (title) {
-          const fontSize = Math.round(54 * s);
+          const fontSize = Math.round(54 * s * fontScale);
           const titleFont = `bold ${fontSize}px 'Tajawal', sans-serif`;
           const titleLines = wrapText(title, titleFont, maxTextW);
           ctx.font = titleFont;
@@ -1029,7 +1031,7 @@ export default function HajwalahAgent() {
 
         // CTA pill (bottom zone)
         if (ctaText) {
-          const fontSize = Math.round(40 * s);
+          const fontSize = Math.round(40 * s * fontScale);
           const ctaFont = `bold ${fontSize}px 'Tajawal', sans-serif`;
           const ctaLines = wrapText(ctaText, ctaFont, maxTextW);
           ctx.font = ctaFont;
@@ -1436,7 +1438,7 @@ ${textReminder}`;
                   const cta = bodyLines.length > 0 ? bodyLines[bodyLines.length - 1].trim() : "شارك الآن 🎮";
                   setOverlayTitle(title);
                   setOverlayCta(cta);
-                  finalImage = await overlayTextOnImage(rawBase64, title, cta);
+                  finalImage = await overlayTextOnImage(rawBase64, title, cta, overlayFontSize / 100);
                 } catch (overlayErr) {
                   console.warn("[TextOverlay] error:", overlayErr);
                 }
@@ -3593,11 +3595,45 @@ Return JSON only:
                       }}
                     />
                   </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: T.textSecondary, fontFamily: "'Tajawal', sans-serif", minWidth: 55 }}>حجم النص</label>
+                    <span style={{ fontSize: 14 }}>🔡</span>
+                    <input
+                      type="range"
+                      min={50}
+                      max={150}
+                      step={10}
+                      value={overlayFontSize}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setOverlayFontSize(val);
+                        if (rawImageRef.current) {
+                          if (fontSizeDebounceRef.current) clearTimeout(fontSizeDebounceRef.current);
+                          fontSizeDebounceRef.current = setTimeout(async () => {
+                            try {
+                              const updated = await overlayTextOnImage(rawImageRef.current, overlayTitle, overlayCta, val / 100);
+                              setGeneratedImage(updated);
+                            } catch {}
+                          }, 200);
+                        }
+                      }}
+                      style={{ flex: 1, accentColor: PURPLE[500] }}
+                    />
+                    <span style={{ fontSize: 14 }}>🔤</span>
+                    <span style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: T.tagText,
+                      fontFamily: "'Tajawal', sans-serif",
+                      minWidth: 35,
+                      textAlign: "center",
+                    }}>{overlayFontSize}%</span>
+                  </div>
                   <button
                     onClick={async () => {
                       if (!rawImageRef.current) return;
                       try {
-                        const updated = await overlayTextOnImage(rawImageRef.current, overlayTitle, overlayCta);
+                        const updated = await overlayTextOnImage(rawImageRef.current, overlayTitle, overlayCta, overlayFontSize / 100);
                         setGeneratedImage(updated);
                       } catch (err) {
                         console.warn("[TextOverlay] update error:", err);
