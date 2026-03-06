@@ -800,7 +800,6 @@ export default function HajwalahAgent() {
   const [imageRefinementMode, setImageRefinementMode] = useState(null); // "replace" | "edit" | null
   const [imageRefinementComment, setImageRefinementComment] = useState("");
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
-  const [imageTextMissing, setImageTextMissing] = useState(false);
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -898,6 +897,117 @@ export default function HajwalahAgent() {
     if (supabaseLoading) return;
     syncToSupabase();
   }, [supabaseLoading, syncToSupabase]);
+
+  // Load Tajawal font for Canvas text overlay
+  const tajawalLoadedRef = useRef(false);
+  useEffect(() => {
+    if (tajawalLoadedRef.current) return;
+    tajawalLoadedRef.current = true;
+    const font = new FontFace("Tajawal", "url(https://fonts.gstatic.com/s/tajawal/v9/Iura6YBj_oCad4k1nzSBC45I.woff2)");
+    font.load().then((loaded) => { document.fonts.add(loaded); }).catch(() => {});
+  }, []);
+
+  // Canvas-based text overlay for generated images
+  const overlayTextOnImage = (base64Image, title, ctaText) =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+
+        const W = canvas.width;
+        const H = canvas.height;
+        const maxTextW = W * 0.85;
+
+        // Top gradient overlay (top 28%)
+        const topH = H * 0.28;
+        const topGrad = ctx.createLinearGradient(0, 0, 0, topH);
+        topGrad.addColorStop(0, "rgba(0,0,0,0.75)");
+        topGrad.addColorStop(1, "transparent");
+        ctx.fillStyle = topGrad;
+        ctx.fillRect(0, 0, W, topH);
+
+        // Bottom gradient overlay (bottom 22%)
+        const botH = H * 0.22;
+        const botGrad = ctx.createLinearGradient(0, H - botH, 0, H);
+        botGrad.addColorStop(0, "transparent");
+        botGrad.addColorStop(1, "rgba(0,0,0,0.80)");
+        ctx.fillStyle = botGrad;
+        ctx.fillRect(0, H - botH, W, botH);
+
+        // Helper: wrap text into lines
+        const wrapText = (text, font, maxW) => {
+          ctx.font = font;
+          const words = text.split(" ");
+          const lines = [];
+          let line = "";
+          for (const word of words) {
+            const test = line ? `${line} ${word}` : word;
+            if (ctx.measureText(test).width > maxW && line) {
+              lines.push(line);
+              line = word;
+            } else {
+              line = test;
+            }
+          }
+          if (line) lines.push(line);
+          return lines;
+        };
+
+        ctx.textAlign = "center";
+        ctx.direction = "rtl";
+
+        // Title text (top zone)
+        if (title) {
+          const titleFont = `bold ${Math.round(54 * (W / 1024))}px 'Tajawal', sans-serif`;
+          const titleLines = wrapText(title, titleFont, maxTextW);
+          ctx.font = titleFont;
+          ctx.fillStyle = "#FFFFFF";
+          ctx.shadowColor = "rgba(0,0,0,0.95)";
+          ctx.shadowBlur = 10;
+          ctx.shadowOffsetX = 3;
+          ctx.shadowOffsetY = 3;
+          const lineH = Math.round(54 * (W / 1024) * 1.4);
+          const totalTextH = titleLines.length * lineH;
+          let y = (topH - totalTextH) / 2 + lineH * 0.8;
+          for (const ln of titleLines) {
+            ctx.fillText(ln, W / 2, y);
+            y += lineH;
+          }
+        }
+
+        // CTA text (bottom zone)
+        if (ctaText) {
+          const ctaFont = `bold ${Math.round(40 * (W / 1024))}px 'Tajawal', sans-serif`;
+          const ctaLines = wrapText(ctaText, ctaFont, maxTextW);
+          ctx.font = ctaFont;
+          ctx.fillStyle = "#FFD700";
+          ctx.shadowColor = "rgba(0,0,0,0.95)";
+          ctx.shadowBlur = 8;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+          const lineH = Math.round(40 * (W / 1024) * 1.4);
+          const totalTextH = ctaLines.length * lineH;
+          let y = H - botH + (botH - totalTextH) / 2 + lineH * 0.8;
+          for (const ln of ctaLines) {
+            ctx.fillText(ln, W / 2, y);
+            y += lineH;
+          }
+        }
+
+        ctx.shadowColor = "transparent";
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => resolve(base64Image); // fallback to original
+      img.src = base64Image;
+    });
 
   useEffect(() => {
     if (trainingPreviewIndex === null) return undefined;
@@ -1029,7 +1139,6 @@ ${textInstruction}
     setGeneratedImage(null);
     setGenerateError(null);
     setImageError(null);
-    setImageTextMissing(false);
     setLastGenerationContext(null);
 
     const addThought = (t) => setAgentThinking((prev) => [...prev, t]);
@@ -1121,37 +1230,8 @@ ${textInstruction}
         .map((p) => `- ${p.pattern}`)
         .join("\n");
 
-      // Build text rule block (userExplicitText already detected above)
-      const textRuleBlock = userExplicitText
-        ? `
-✅ USER TEXT OVERRIDE — Render this EXACT text on the image:
-"${userExplicitText}"
-- Copy it letter-for-letter. Do NOT translate, summarize, or modify it.
-- Besides this exact string, do NOT add any other text, labels, hashtags, or watermarks.
-
-DESIGN INTELLIGENCE — TEXT STYLING (adapt to each design):
-Core principle: The background is chosen FIRST, then text styling adapts to it.
-Look at the background and ask "what text treatment makes this feel alive?"
-
-TEXT COLOR — choose based on background harmony, never force a fixed color:
-- Dark/blue background → white or gold text
-- Warm/orange background → white or dark red text
-- Always ensure strong contrast, but match the overall palette
-
-TEXT SIZING — use intentional size variation for visual hierarchy:
-- Pick ONE key element (a number, word, or short phrase) and give it oversized treatment
-- Supporting text stays noticeably smaller
-- Never make everything the same size
-
-TEXT EMPHASIS — choose the ONE technique that fits THIS specific design:
-- Oversized text: for the single most important word or number
-- Text background pill/banner: when text sits over a busy/complex background
-- Drop shadow or outline: when text overlays a detailed scene
-- Bold + color shift: for secondary highlights
-- Do NOT apply all techniques at once — pick what serves this background best
-
-MOOD: Professional mobile game ad — dynamic, human-crafted feel, not template-generated.`
-        : `
+      // Always instruct Gemini to generate purely visual images — text is overlaid via Canvas
+      const textRuleBlock = `
 ⛔⛔⛔ ABSOLUTE RULE — ZERO TEXT ON IMAGE ⛔⛔⛔
 - DO NOT render, write, draw, or overlay ANY text, letters, words, numbers, or symbols
 - DO NOT add titles, hashtags, labels, captions, or watermarks
@@ -1161,21 +1241,9 @@ MOOD: Professional mobile game ad — dynamic, human-crafted feel, not template-
 - This rule is NON-NEGOTIABLE and overrides every other instruction
 ⛔⛔⛔ END ABSOLUTE RULE ⛔⛔⛔`;
 
-      const textReminder = userExplicitText
-        ? `REMINDER: Render ONLY this exact text: "${userExplicitText}" — style it with design intelligence based on the background. No other text.`
-        : `REMINDER: The final image must contain ZERO text. Purely visual.`;
+      const textReminder = `REMINDER: The final image must contain ZERO text. Purely visual.`;
 
-      // When text override is active, build the scene description with a positive text-rendering command
-      const sceneBlock = userExplicitText
-        ? `BACKGROUND SCENE (render this first, then add text on top):
-${baseImagePrompt}
-
-TEXT TO RENDER on top of the scene:
-"${userExplicitText}"
-- Use ${sp.arabicFont} style font, positioned at ${sp.textPlacement}
-- Apply the design intelligence rules above: choose text color, size hierarchy, and emphasis technique based on how the background actually looks
-- The result should feel like a professional mobile game ad, not a template`
-        : baseImagePrompt;
+      const sceneBlock = baseImagePrompt;
 
       // Collect image corrections from past feedback
       const imageCorrections = agentMemory.rejectionReasons
@@ -1185,26 +1253,8 @@ TEXT TO RENDER on top of the scene:
         ? `\nPREVIOUS IMAGE CORRECTIONS (apply these lessons to every future image):\n${imageCorrections.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n`
         : "";
 
-      // Force text rendering block — prepended when user requested text on image
-      const mandatoryTextBlock = userExplicitText
-        ? `⚠️ MANDATORY TEXT REQUIREMENT — THIS IS THE MOST IMPORTANT INSTRUCTION:
-You MUST render the following Arabic text directly on the image. This is non-negotiable.
-If you do not render this text visibly on the image, the output is considered a failure.
-
-MAIN TEXT: "${userExplicitText}"
-CTA TEXT: "${postTitle}"
-
-Text rendering rules:
-- Place main text in the upper third of the image
-- Place CTA text in the lower third over a semi-transparent dark overlay
-- Font must be large, bold, white with dark shadow/outline
-- Text must be fully readable at a glance
-
-`
-        : "";
-
       const imagePromptText = hasStyleRefs
-        ? `${mandatoryTextBlock}CRITICAL: Match the visual style of the provided reference images FIRST.
+        ? `CRITICAL: Match the visual style of the provided reference images FIRST.
 The reference images show the game's actual aesthetic: realistic Saudi streets,
 daylight/natural lighting, real road environments.
 Learned patterns below are suggestions only — NEVER apply them if they contradict the reference image style.
@@ -1230,7 +1280,7 @@ ${stylePatterns}
 SCENE: ${sceneBlock}
 
 ${textReminder}`
-        : `${mandatoryTextBlock}${textRuleBlock}
+        : `${textRuleBlock}
 
 ${sceneBlock}
 
@@ -1306,106 +1356,20 @@ ${textReminder}`;
             const parts = candidate?.content?.parts || [];
             const imagePart = parts.find((p) => p.inlineData);
             if (imagePart) {
-              let finalMime = imagePart.inlineData.mimeType;
-              let finalData = imagePart.inlineData.data;
-              setImageTextMissing(false);
+              const { mimeType, data } = imagePart.inlineData;
+              let finalImage = `data:${mimeType};base64,${data}`;
 
-              // Text validation: if user requested text, verify it rendered
+              // Canvas text overlay when user requested text on the image
               if (userExplicitText) {
-                addThought("🔍 التحقق من ظهور النص على الصورة...");
+                addThought("✍️ إضافة النص على الصورة بتقنية Canvas...");
                 try {
-                  const validateResp = await fetch(ANTHROPIC_URL, {
-                    method: "POST",
-                    headers: ANTHROPIC_HEADERS,
-                    body: JSON.stringify({
-                      model: "claude-sonnet-4-6",
-                      max_tokens: 10,
-                      messages: [{
-                        role: "user",
-                        content: [
-                          { type: "image", source: { type: "base64", media_type: finalMime, data: finalData } },
-                          { type: "text", text: "Look at this image. Does it contain visible Arabic text? Reply with only: YES or NO" },
-                        ],
-                      }],
-                    }),
-                  });
-                  const validateData = await validateResp.json();
-                  const answer = (validateData.content?.[0]?.text || "").trim().toUpperCase();
-                  console.log("[TextValidation] answer:", answer);
-
-                  if (answer.includes("NO")) {
-                    addThought("⚠️ النص لم يظهر — إعادة التوليد بتأكيد أقوى...");
-
-                    // Retry with stronger instruction
-                    const retryPrompt = `CRITICAL FAILURE: Previous attempt had no text. You MUST render Arabic text on this image.\n\n${imagePromptText}`;
-                    const retryParts = [];
-                    if (hasStyleRefs) {
-                      for (const ref of styleRefs.slice(-3)) {
-                        retryParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
-                      }
-                    }
-                    retryParts.push({ text: retryPrompt });
-
-                    const retryController = new AbortController();
-                    const retryTimeout = setTimeout(() => retryController.abort(), 120000);
-                    const retryResp = await fetch(IMAGE_URL, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      signal: retryController.signal,
-                      body: JSON.stringify({
-                        contents: [{ parts: retryParts }],
-                        generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-                      }),
-                    });
-                    clearTimeout(retryTimeout);
-
-                    if (retryResp.ok) {
-                      const retryData = await retryResp.json();
-                      const retryImgPart = retryData.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
-                      if (retryImgPart) {
-                        finalMime = retryImgPart.inlineData.mimeType;
-                        finalData = retryImgPart.inlineData.data;
-
-                        // Validate retry
-                        try {
-                          const v2Resp = await fetch(ANTHROPIC_URL, {
-                            method: "POST",
-                            headers: ANTHROPIC_HEADERS,
-                            body: JSON.stringify({
-                              model: "claude-sonnet-4-6",
-                              max_tokens: 10,
-                              messages: [{
-                                role: "user",
-                                content: [
-                                  { type: "image", source: { type: "base64", media_type: finalMime, data: finalData } },
-                                  { type: "text", text: "Look at this image. Does it contain visible Arabic text? Reply with only: YES or NO" },
-                                ],
-                              }],
-                            }),
-                          });
-                          const v2Data = await v2Resp.json();
-                          const v2Answer = (v2Data.content?.[0]?.text || "").trim().toUpperCase();
-                          if (v2Answer.includes("NO")) {
-                            setImageTextMissing(true);
-                            addThought("⚠️ النص لم يظهر حتى بعد الإعادة");
-                          } else {
-                            addThought("✅ النص ظهر بنجاح في المحاولة الثانية!");
-                          }
-                        } catch {
-                          // If validation fails, show the image anyway
-                        }
-                      }
-                    }
-                  } else {
-                    addThought("✅ النص موجود على الصورة!");
-                  }
-                } catch (valErr) {
-                  console.warn("[TextValidation] error:", valErr);
-                  // If validation fails, proceed without blocking
+                  finalImage = await overlayTextOnImage(finalImage, userExplicitText, postTitle);
+                } catch (overlayErr) {
+                  console.warn("[TextOverlay] error:", overlayErr);
                 }
               }
 
-              setGeneratedImage(`data:${finalMime};base64,${finalData}`);
+              setGeneratedImage(finalImage);
               addThought("✅ تم توليد الصورة بنجاح!");
             } else {
               const textParts = parts.filter((p) => p.text).map((p) => p.text).join(" ");
@@ -3456,24 +3420,6 @@ Return JSON only:
                   }}>
                     Nano Banana 2 — Hajwalah Agent v{agentLevel}.{agentMemory.totalInteractions}
                   </div>
-                  {imageTextMissing && (
-                    <div style={{
-                      position: "absolute",
-                      top: 12,
-                      right: 12,
-                      fontSize: 12,
-                      color: "#fbbf24",
-                      fontFamily: "'Tajawal', sans-serif",
-                      fontWeight: 700,
-                      background: "rgba(0,0,0,0.7)",
-                      padding: "6px 12px",
-                      borderRadius: 8,
-                      backdropFilter: "blur(8px)",
-                      direction: "rtl",
-                    }}>
-                      النص لم يظهر على الصورة — جرب التعديل
-                    </div>
-                  )}
                 </div>
               )}
 
