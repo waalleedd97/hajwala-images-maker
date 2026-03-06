@@ -797,6 +797,9 @@ export default function HajwalahAgent() {
   const [generateError, setGenerateError] = useState(null);
   const [imageError, setImageError] = useState(null);
   const [lastGenerationContext, setLastGenerationContext] = useState(null);
+  const [imageRefinementMode, setImageRefinementMode] = useState(null); // "replace" | "edit" | null
+  const [imageRefinementComment, setImageRefinementComment] = useState("");
+  const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -1172,6 +1175,14 @@ TEXT TO RENDER on top of the scene:
 - The result should feel like a professional mobile game ad, not a template`
         : baseImagePrompt;
 
+      // Collect image corrections from past feedback
+      const imageCorrections = agentMemory.rejectionReasons
+        .filter((r) => r.type === "image_correction")
+        .map((r) => r.reason);
+      const correctionsBlock = imageCorrections.length > 0
+        ? `\nPREVIOUS IMAGE CORRECTIONS (apply these lessons to every future image):\n${imageCorrections.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n`
+        : "";
+
       const imagePromptText = hasStyleRefs
         ? `CRITICAL: Match the visual style of the provided reference images FIRST.
 The reference images show the game's actual aesthetic: realistic Saudi streets,
@@ -1192,7 +1203,7 @@ REFERENCE IMAGES (PRIMARY STYLE GUIDE — highest priority):
 STYLE PROFILE (secondary):
 - Color palette: ${sp.preferredColors.join(", ")} (only if compatible with reference images)
 - Composition: ${sp.preferredComposition}
-
+${correctionsBlock}
 LEARNED PATTERNS (hints only — override if they conflict with reference images):
 ${stylePatterns}
 
@@ -1207,7 +1218,7 @@ STYLE PROFILE:
 - Color palette: ${sp.preferredColors.join(", ")}
 - Composition: ${sp.preferredComposition}
 - High contrast, dramatic lighting
-
+${correctionsBlock}
 LEARNED PATTERNS:
 ${stylePatterns}
 
@@ -1318,6 +1329,91 @@ ${textReminder}`;
     } finally {
       setIsGenerating(false);
       setShowResult(true);
+    }
+  };
+
+  const handleRegenerateImage = async () => {
+    const comment = imageRefinementComment.trim();
+    if (!comment || !lastGenerationContext?.finalImagePrompt) return;
+
+    const mode = imageRefinementMode; // "replace" or "edit"
+    setIsRegeneratingImage(true);
+    setImageError(null);
+    setGeneratedImage(null);
+
+    try {
+      // Save comment as a permanent image correction
+      const rejId = await sbInsertRejection({ reason: comment, type: "image_correction" });
+      setAgentMemory((prev) => ({
+        ...prev,
+        rejectionReasons: [...prev.rejectionReasons, { id: rejId, reason: comment, type: "image_correction", time: Date.now() }],
+      }));
+
+      // Build the corrected prompt
+      const basePrompt = lastGenerationContext.finalImagePrompt;
+      let correctedPrompt;
+      if (mode === "edit") {
+        correctedPrompt = `${basePrompt}
+
+USER CORRECTION (highest priority):
+${comment}
+Apply this correction to the previous image concept while keeping the rest of the style.`;
+      } else {
+        correctedPrompt = `${basePrompt}
+
+AVOID (based on user feedback):
+${comment}
+Generate a completely fresh interpretation — do NOT reuse the previous image concept.`;
+      }
+
+      const imageParts = [];
+      if (styleRefs.length > 0) {
+        for (const ref of styleRefs.slice(-3)) {
+          imageParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } });
+        }
+      }
+      imageParts.push({ text: correctedPrompt });
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
+
+      const response = await fetch(IMAGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ parts: imageParts }],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+        }),
+      });
+      clearTimeout(timeout);
+
+      if (response.ok) {
+        const data = await response.json();
+        const parts = data.candidates?.[0]?.content?.parts || [];
+        const imgPart = parts.find((p) => p.inlineData);
+        if (imgPart) {
+          setGeneratedImage(`data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`);
+          setLastGenerationContext((prev) => ({ ...prev, finalImagePrompt: correctedPrompt }));
+        } else {
+          setImageError("لم يتم توليد صورة جديدة");
+        }
+      } else {
+        const errBody = await response.text().catch(() => "");
+        let detail = "";
+        try { detail = JSON.parse(errBody)?.error?.message || ""; } catch {}
+        setImageError(`خطأ ${response.status}: ${detail || "فشل توليد الصورة"}`);
+      }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setImageError("انتهت مهلة توليد الصورة (120 ثانية)");
+      } else {
+        setImageError(err.message || "خطأ غير متوقع");
+      }
+    } finally {
+      setIsRegeneratingImage(false);
+      setImageRefinementMode(null);
+      setImageRefinementComment("");
     }
   };
 
@@ -3242,6 +3338,156 @@ Return JSON only:
                   }}>
                     Nano Banana 2 — Hajwalah Agent v{agentLevel}.{agentMemory.totalInteractions}
                   </div>
+                </div>
+              )}
+
+              {/* Image Refinement Controls */}
+              {generatedImage && !feedbackGiven && (
+                <div style={{
+                  marginTop: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  direction: "rtl",
+                }}>
+                  {/* Refinement Buttons */}
+                  {!imageRefinementMode && !isRegeneratingImage && (
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        onClick={() => setImageRefinementMode("replace")}
+                        style={{
+                          flex: 1,
+                          padding: "10px 16px",
+                          borderRadius: 12,
+                          border: `1px solid ${PURPLE[600]}`,
+                          background: T.softBg,
+                          color: T.textPrimary,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          fontFamily: "'Tajawal', sans-serif",
+                          cursor: "pointer",
+                        }}
+                      >
+                        استبدال الصورة
+                      </button>
+                      <button
+                        onClick={() => setImageRefinementMode("edit")}
+                        style={{
+                          flex: 1,
+                          padding: "10px 16px",
+                          borderRadius: 12,
+                          border: `1px solid ${PURPLE[600]}`,
+                          background: T.softBg,
+                          color: T.textPrimary,
+                          fontSize: 14,
+                          fontWeight: 700,
+                          fontFamily: "'Tajawal', sans-serif",
+                          cursor: "pointer",
+                        }}
+                      >
+                        تعديل الصورة
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Comment Input when mode selected */}
+                  {imageRefinementMode && !isRegeneratingImage && (
+                    <div style={{
+                      background: T.softBg,
+                      border: `1px solid ${PURPLE[600]}`,
+                      borderRadius: 16,
+                      padding: 16,
+                    }}>
+                      <div style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: T.tagText,
+                        marginBottom: 8,
+                        fontFamily: "'Tajawal', sans-serif",
+                      }}>
+                        {imageRefinementMode === "edit" ? "وش تبي تعدل؟" : "وش المطلوب في الصورة الجديدة؟"}
+                      </div>
+                      <textarea
+                        value={imageRefinementComment}
+                        onChange={(e) => setImageRefinementComment(e.target.value)}
+                        placeholder={imageRefinementMode === "edit"
+                          ? "مثال: خلّ الدخان أقل والسيارة أوضح..."
+                          : "مثال: أبي صورة من زاوية ثانية بإضاءة أقوى..."
+                        }
+                        style={{
+                          width: "100%",
+                          minHeight: 60,
+                          padding: 12,
+                          borderRadius: 10,
+                          border: `1px solid ${T.cardBorder}`,
+                          background: T.inputBg,
+                          color: T.textPrimary,
+                          fontSize: 14,
+                          fontFamily: "'Tajawal', sans-serif",
+                          resize: "vertical",
+                          direction: "rtl",
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        <button
+                          onClick={handleRegenerateImage}
+                          disabled={!imageRefinementComment.trim()}
+                          style={{
+                            flex: 1,
+                            padding: "10px 16px",
+                            borderRadius: 10,
+                            border: "none",
+                            background: imageRefinementComment.trim()
+                              ? `linear-gradient(135deg, ${PURPLE[600]}, ${PURPLE[500]})`
+                              : T.cardBorder,
+                            color: imageRefinementComment.trim() ? "white" : T.textMuted,
+                            fontSize: 14,
+                            fontWeight: 700,
+                            fontFamily: "'Tajawal', sans-serif",
+                            cursor: imageRefinementComment.trim() ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          {imageRefinementMode === "edit" ? "عدّل الصورة" : "ولّد صورة جديدة"}
+                        </button>
+                        <button
+                          onClick={() => { setImageRefinementMode(null); setImageRefinementComment(""); }}
+                          style={{
+                            padding: "10px 16px",
+                            borderRadius: 10,
+                            border: `1px solid ${T.cardBorder}`,
+                            background: "transparent",
+                            color: T.textSecondary,
+                            fontSize: 14,
+                            fontFamily: "'Tajawal', sans-serif",
+                            cursor: "pointer",
+                          }}
+                        >
+                          إلغاء
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Regenerating spinner */}
+                  {isRegeneratingImage && (
+                    <div style={{
+                      textAlign: "center",
+                      padding: 20,
+                      background: T.softBg,
+                      borderRadius: 16,
+                      border: `1px solid ${T.cardBorder}`,
+                    }}>
+                      <div style={{ fontSize: 28, marginBottom: 8, animation: "spin 2s linear infinite" }}>🔄</div>
+                      <div style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: T.textPrimary,
+                        fontFamily: "'Tajawal', sans-serif",
+                      }}>
+                        {imageRefinementMode === "edit" ? "جاري تعديل الصورة..." : "جاري توليد صورة جديدة..."}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
