@@ -477,6 +477,7 @@ const sbUpsertAgentState = async (state) => {
     scoring_engine: state.agentMemory.scoringEngine,
     successful_prompts: state.agentMemory.successfulPrompts,
     total_interactions: state.agentMemory.totalInteractions,
+    recent_posts: state.recentPosts || [],
     updated_at: new Date().toISOString(),
   });
   if (error) console.warn("Failed to upsert agent state:", error);
@@ -806,6 +807,9 @@ export default function HajwalahAgent() {
   const [overlayFontSize, setOverlayFontSize] = useState(100);
   const rawImageRef = useRef(null); // stores pre-overlay base64
   const fontSizeDebounceRef = useRef(null);
+  const [recentPosts, setRecentPosts] = useState([]);
+  const [expandedGuideStep, setExpandedGuideStep] = useState(null);
+  const [previewRecentPost, setPreviewRecentPost] = useState(null);
 
   // Manual memory management state
   const [newPatternText, setNewPatternText] = useState("");
@@ -875,6 +879,7 @@ export default function HajwalahAgent() {
           setTotalGenerated(agentState.total_generated ?? 0);
           setAcceptedCount(agentState.accepted_count ?? 0);
           setRejectedCount(agentState.rejected_count ?? 0);
+          if (Array.isArray(agentState.recent_posts)) setRecentPosts(agentState.recent_posts);
         }
 
         setStyleRefs(refs);
@@ -895,9 +900,9 @@ export default function HajwalahAgent() {
   const syncToSupabase = useCallback(() => {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(() => {
-      sbUpsertAgentState({ agentLevel, agentXP, totalGenerated, acceptedCount, rejectedCount, agentMemory });
+      sbUpsertAgentState({ agentLevel, agentXP, totalGenerated, acceptedCount, rejectedCount, agentMemory, recentPosts });
     }, 1000);
-  }, [agentLevel, agentXP, totalGenerated, acceptedCount, rejectedCount, agentMemory]);
+  }, [agentLevel, agentXP, totalGenerated, acceptedCount, rejectedCount, agentMemory, recentPosts]);
 
   useEffect(() => {
     if (supabaseLoading) return;
@@ -1445,6 +1450,21 @@ ${textReminder}`;
               }
 
               setGeneratedImage(finalImage);
+              // Save to recent posts (keep last 4, store thumbnail)
+              try {
+                const thumbCanvas = document.createElement("canvas");
+                thumbCanvas.width = 256;
+                thumbCanvas.height = 256;
+                const thumbCtx = thumbCanvas.getContext("2d");
+                const thumbImg = new Image();
+                await new Promise((res) => { thumbImg.onload = res; thumbImg.src = finalImage; });
+                const scale = Math.max(256 / thumbImg.width, 256 / thumbImg.height);
+                const sw = thumbImg.width * scale;
+                const sh = thumbImg.height * scale;
+                thumbCtx.drawImage(thumbImg, (256 - sw) / 2, (256 - sh) / 2, sw, sh);
+                const thumb = thumbCanvas.toDataURL("image/jpeg", 0.7);
+                setRecentPosts((prev) => [{ image: thumb, title: content.title || "", time: Date.now() }, ...prev].slice(0, 4));
+              } catch {}
               addThought("✅ تم توليد الصورة بنجاح!");
             } else {
               const textParts = parts.filter((p) => p.text).map((p) => p.text).join(" ");
@@ -2393,98 +2413,193 @@ Return JSON only:
         ))}
       </div>
 
-      {/* How Agent Works - Cards */}
+      {/* Recent Posts Gallery */}
       <div style={{ padding: "0 20px", maxWidth: 900, margin: "0 auto 48px" }}>
         <h2 style={{
           textAlign: "center",
-          fontSize: 26,
+          fontSize: 22,
           fontWeight: 800,
           color: T.text,
-          marginBottom: 32,
+          marginBottom: 20,
           fontFamily: "'Tajawal', sans-serif",
         }}>
-          🧠 كيف يتعلم الوكيل؟
+          آخر البوستات المولّدة
+        </h2>
+        {recentPosts.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {recentPosts.map((post, i) => (
+              <div
+                key={i}
+                onClick={() => setPreviewRecentPost(post)}
+                style={{
+                  borderRadius: 16,
+                  overflow: "hidden",
+                  position: "relative",
+                  cursor: "pointer",
+                  border: `1px solid ${T.cardBorder}`,
+                  aspectRatio: "1",
+                }}
+              >
+                <img src={post.image} alt={post.title} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                <div style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  padding: "20px 10px 8px",
+                  background: "linear-gradient(transparent, rgba(0,0,0,0.7))",
+                  color: "white",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  fontFamily: "'Tajawal', sans-serif",
+                  direction: "rtl",
+                  lineHeight: 1.4,
+                }}>
+                  {post.title}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{
+            textAlign: "center",
+            padding: 40,
+            background: T.softBg,
+            borderRadius: 20,
+            border: `1px solid ${T.cardBorder}`,
+          }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🚀</div>
+            <p style={{ fontSize: 15, color: T.textSecondary, fontFamily: "'Tajawal', sans-serif" }}>
+              لم تولّد أي بوست بعد — ابدأ الآن!
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Recent Post Preview Modal */}
+      {previewRecentPost && (
+        <div
+          onClick={() => setPreviewRecentPost(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+          }}
+        >
+          <img
+            src={previewRecentPost.image}
+            alt={previewRecentPost.title}
+            style={{ maxWidth: "90%", maxHeight: "85vh", borderRadius: 16, boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      {/* How to Use the Agent - Guide */}
+      <div style={{ padding: "0 20px", maxWidth: 900, margin: "0 auto 48px" }}>
+        <h2 style={{
+          textAlign: "center",
+          fontSize: 22,
+          fontWeight: 800,
+          color: T.text,
+          marginBottom: 20,
+          fontFamily: "'Tajawal', sans-serif",
+        }}>
+          🎯 كيف تستخدم الوكيل بشكل صحيح؟
         </h2>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, direction: "rtl" }}>
           {[
             {
-              icon: "memory",
-              title: "الذاكرة المتطورة",
-              desc: "يخزن كل تفاعل ويبني ملف ستايل كامل عن ذوقك في التصميم",
-              color: PURPLE[600],
+              num: "1️⃣",
+              title: "كيف تكتب برومبت صح",
+              content: `✅ اكتب الهدف بوضوح:\n"بوست يعلن عن تحديث جديد للعبة فيه سيارة كامري"\n\n✅ حدد النبرة:\n"أسلوب حماسي يخاطب شباب السعودية"\n\n✅ اطلب نص على الصورة إذا تبيه:\n"ضع على الصورة: حمّل الآن"\n\n❌ تجنب البرومبت المبهم:\n"سوّي بوست حلو"`,
             },
             {
-              icon: "loop",
-              title: "حلقة التعلم",
-              desc: "كل رفض = درس جديد. كل قبول = تأكيد. الوكيل يعدل برومبتاته تلقائياً",
-              color: "#dc2626",
+              num: "2️⃣",
+              title: "كيف تدرّب الوكيل على ذوقك",
+              content: `• بعد كل بوست: اضغط ✅ قبول أو ❌ رفض\n  الوكيل يتعلم من كل تقييم تلقائياً\n\n• في وضع التدريب: يولّد 6 صور متنوعة\n  قيّمها وحلّل — الوكيل يستخرج أنماطك البصرية\n\n• كلما زادت تقييماتك، كلما صارت النتائج أدق`,
             },
             {
-              icon: "brain",
-              title: "تحليل الأنماط",
-              desc: "يحلل ليش قبلت صورة وليش رفضت ثانية ويكتشف الأنماط المشتركة",
-              color: PURPLE[400],
+              num: "3️⃣",
+              title: "كيف تضيف قاعدة ثابتة للوكيل",
+              content: `روح صفحة الذاكرة ← ذاكرة الرفض ← أضف يدوياً:\n\nمثال:\n"لا تستخدم اللهجة المصرية أبداً"\n"الخلفية تكون دايماً داكنة"\n"لا تذكر أسماء منافسين"\n\nهذي تصبح قوانين صارمة في كل بوست جديد`,
             },
             {
-              icon: "rocket",
-              title: "برومبت ديناميكي",
-              desc: "يبني البرومبت من الصفر كل مره بناءً على كل شي تعلمه",
-              color: "#ea580c",
+              num: "4️⃣",
+              title: "كيف تعدّل النص على الصورة",
+              content: `بعد توليد الصورة، تظهر خانتان:\n• العنوان — عدّله كيف تبي\n• نص الدعوة — اكتب الـ CTA اللي تبيه\n\nاضغط "تحديث النص على الصورة" وتشوف التغيير فوراً\nكذلك تقدر تكبر أو تصغر النص بالـ slider`,
             },
             {
-              icon: "shield",
-              title: "النيقاتف برومبت",
-              desc: "يبني قائمة من الأشياء اللي ما تبيها ويضيفها تلقائياً",
-              color: "#2563eb",
+              num: "5️⃣",
+              title: "كيف تعدّل الصورة إذا ما عجبتك",
+              content: `• تعديل الصورة: نفس الستايل مع تصحيح محدد\n  اكتب ملاحظتك مثل: "أبي السيارة أوضح من الأمام"\n\n• استبدال الصورة: صورة جديدة كلياً\n  اكتب ملاحظتك مثل: "تجنب الدخان الكثير"\n\n⚡ ملاحظاتك تُحفظ وتؤثر على الصور القادمة`,
             },
             {
-              icon: "chart",
-              title: "تقييم الثقة",
-              desc: "يعطي نفسه درجة ثقة ويقول لك متى يحتاج توجيه أكثر",
-              color: "#059669",
+              num: "6️⃣",
+              title: "كيف ترفع صور مرجعية للعبة",
+              content: `صفحة الذاكرة ← مكتبة صور اللعبة\nارفع سكرينشوتات من اللعبة\n\nالوكيل يستخدمها كـ "DNA البصري" عند توليد الصور\nكلما رفعت أكثر، كلما اقتربت الصور من ستايل لعبتك`,
             },
-          ].map((card, i) => (
+          ].map((step, i) => (
             <div
               key={i}
               style={{
                 background: T.cardBg,
-                borderRadius: 24,
-                padding: 28,
+                borderRadius: 16,
                 border: `1px solid ${T.cardBorder}`,
-                boxShadow: darkMode ? "0 4px 24px rgba(0,0,0,0.2)" : "0 4px 24px rgba(147,51,234,0.06)",
-                transition: "all 0.3s",
-                cursor: "default",
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.transform = "translateY(-4px)";
-                e.currentTarget.style.boxShadow = darkMode ? "0 12px 40px rgba(0,0,0,0.35)" : "0 12px 40px rgba(147,51,234,0.12)";
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = darkMode ? "0 4px 24px rgba(0,0,0,0.2)" : "0 4px 24px rgba(147,51,234,0.06)";
+                overflow: "hidden",
+                transition: "all 0.2s",
               }}
             >
-              <div style={{ marginBottom: 16 }}>
-                <Icon3D type={card.icon} size={52} />
-              </div>
-              <h3 style={{
-                fontSize: 18,
-                fontWeight: 700,
-                color: T.text,
-                marginBottom: 8,
-                fontFamily: "'Tajawal', sans-serif",
-              }}>
-                {card.title}
-              </h3>
-              <p style={{
-                fontSize: 14,
-                color: T.textSecondary,
-                lineHeight: 1.8,
-                fontFamily: "'Tajawal', sans-serif",
-              }}>
-                {card.desc}
-              </p>
+              <button
+                onClick={() => setExpandedGuideStep(expandedGuideStep === i ? null : i)}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "14px 18px",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  direction: "rtl",
+                }}
+              >
+                <span style={{ fontSize: 20 }}>{step.num}</span>
+                <span style={{
+                  flex: 1,
+                  textAlign: "right",
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: T.text,
+                  fontFamily: "'Tajawal', sans-serif",
+                }}>{step.title}</span>
+                <span style={{
+                  fontSize: 16,
+                  color: T.textMuted,
+                  transform: expandedGuideStep === i ? "rotate(180deg)" : "rotate(0)",
+                  transition: "transform 0.2s",
+                }}>▼</span>
+              </button>
+              {expandedGuideStep === i && (
+                <div style={{
+                  padding: "0 18px 16px",
+                  fontSize: 14,
+                  color: T.textSecondary,
+                  lineHeight: 2,
+                  fontFamily: "'Tajawal', sans-serif",
+                  whiteSpace: "pre-line",
+                  borderTop: `1px solid ${T.cardBorder}`,
+                  paddingTop: 14,
+                }}>
+                  {step.content}
+                </div>
+              )}
             </div>
           ))}
         </div>
