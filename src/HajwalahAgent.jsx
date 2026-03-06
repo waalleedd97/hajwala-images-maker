@@ -1233,7 +1233,14 @@ ${textInstruction}
         ? `\nPREVIOUS IMAGE CORRECTIONS (apply these lessons to every future image):\n${imageCorrections.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n`
         : "";
 
-      const cleanBgInstruction = `IMPORTANT: Generate a CLEAN background scene only.
+      const cleanBgInstruction = `MANDATORY COMPOSITION RULE:
+Every image MUST contain at least one car as the main subject.
+The car must be clearly visible, prominent, and in the foreground.
+Never generate a road, street, or environment scene without a car in it.
+If the post topic does not mention a specific car, default to a Saudi drifting/racing scene with a visible car.
+A carless image is considered a generation failure.
+
+IMPORTANT: Generate a CLEAN background scene only.
 - Do NOT draw any text
 - Do NOT draw any dark rectangles, boxes, panels, or placeholders
 - Do NOT leave any blank areas for text
