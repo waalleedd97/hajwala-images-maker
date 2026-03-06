@@ -6,9 +6,15 @@ import { useState, useEffect, useRef } from "react";
 // ============================================================
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const TEXT_MODEL = "gemini-3.1-flash-lite-preview";
+const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
 const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
-const TEXT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_HEADERS = {
+  "content-type": "application/json",
+  "x-api-key": ANTHROPIC_API_KEY,
+  "anthropic-version": "2023-06-01",
+  "anthropic-dangerous-direct-browser-access": "true",
+};
 const IMAGE_URL = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 const PURPLE = {
@@ -878,7 +884,7 @@ ${textInstruction}
     const addThought = (t) => setAgentThinking((prev) => [...prev, t]);
 
     try {
-      // Step 1: Build prompt & get text content from Gemini Flash
+      // Step 1: Build prompt & get text content from Claude Sonnet
       addThought("🔍 تحليل نوع البوست المطلوب...");
       await new Promise((r) => setTimeout(r, 300));
       addThought("🧠 تحميل الذاكرة وأنماط النجاح السابقة...");
@@ -895,22 +901,20 @@ ${textInstruction}
       const generationStrategy = deriveGenerationStrategy(userExplicitText);
       const prompt = buildAgentPrompt(userExplicitText, generationStrategy);
       addThought("🤔 الوكيل يفكّر ويحلل قبل الكتابة...");
-      addThought("📡 إرسال البرومبت إلى Gemini 3.1 Flash Lite...");
+      addThought("📡 إرسال البرومبت إلى Claude Sonnet...");
 
       const textController = new AbortController();
       const textTimeout = setTimeout(() => textController.abort(), 60000);
 
-      const textResponse = await fetch(TEXT_URL, {
+      const textResponse = await fetch(ANTHROPIC_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...ANTHROPIC_HEADERS },
         signal: textController.signal,
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.9,
-            topP: 0.95,
-            maxOutputTokens: 2048,
-          },
+          model: "claude-sonnet-4-6",
+          max_tokens: 2048,
+          temperature: 0.9,
+          messages: [{ role: "user", content: prompt }],
         }),
       });
 
@@ -925,7 +929,7 @@ ${textInstruction}
       }
 
       const textData = await textResponse.json();
-      const rawText = textData.candidates?.[0]?.content?.parts?.[0]?.text;
+      const rawText = textData.content?.[0]?.text;
 
       if (!rawText) {
         throw new Error("لم يتم استلام رد من النموذج");
@@ -1064,7 +1068,7 @@ ${textReminder}`;
       console.log("[DEBUG-IMG] FULL imagePromptText:", imagePromptText);
 
       const imageController = new AbortController();
-      const imageTimeout = setTimeout(() => imageController.abort(), 60000);
+      const imageTimeout = setTimeout(() => imageController.abort(), 120000);
 
       try {
         const imageResponse = await fetch(IMAGE_URL, {
@@ -1116,8 +1120,8 @@ ${textReminder}`;
       } catch (imgErr) {
         clearTimeout(imageTimeout);
         if (imgErr.name === "AbortError") {
-          console.error("Image generation timed out after 60s");
-          setImageError("انتهت مهلة توليد الصورة (60 ثانية)");
+          console.error("Image generation timed out after 120s");
+          setImageError("انتهت مهلة توليد الصورة (120 ثانية)");
           addThought("⚠️ انتهت مهلة توليد الصورة — سيتم عرض النص فقط");
         } else {
           console.error("Image generation error:", imgErr);
@@ -1295,24 +1299,22 @@ Return JSON only:
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     try {
-      const response = await fetch(TEXT_URL, {
+      const response = await fetch(ANTHROPIC_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...ANTHROPIC_HEADERS },
         signal: controller.signal,
         body: JSON.stringify({
-          contents: [{ parts: [{ text: planningPrompt }] }],
-          generationConfig: {
-            temperature: 0.95,
-            topP: 0.95,
-            maxOutputTokens: 900,
-          },
+          model: "claude-sonnet-4-6",
+          max_tokens: 900,
+          temperature: 0.95,
+          messages: [{ role: "user", content: planningPrompt }],
         }),
       });
       clearTimeout(timeout);
 
       if (!response.ok) throw new Error(`Training planning API ${response.status}`);
       const data = await response.json();
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const raw = data.content?.[0]?.text;
       const parsed = raw ? extractJSON(raw) : null;
 
       const rawDirections = parsed?.directions || parsed?.variations || [];
@@ -1414,7 +1416,7 @@ ${basePrompt}`;
 
         const parts = [...refParts, { text: fullPrompt }];
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 60000);
+        const timeout = setTimeout(() => controller.abort(), 120000);
 
         try {
           const response = await fetch(IMAGE_URL, {
@@ -1581,20 +1583,22 @@ Return JSON only:
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
       try {
-        const response = await fetch(TEXT_URL, {
+        const response = await fetch(ANTHROPIC_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...ANTHROPIC_HEADERS },
           signal: controller.signal,
           body: JSON.stringify({
-            contents: [{ parts: [{ text: analysisPrompt }] }],
-            generationConfig: { temperature: 0.7, maxOutputTokens: 700 },
+            model: "claude-sonnet-4-6",
+            max_tokens: 700,
+            temperature: 0.7,
+            messages: [{ role: "user", content: analysisPrompt }],
           }),
         });
         clearTimeout(timeout);
 
         if (response.ok) {
           const data = await response.json();
-          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          const rawText = data.content?.[0]?.text;
           if (rawText) {
             const result = extractJSON(rawText);
             positivePatterns = Array.isArray(result?.positivePatterns)
@@ -1672,7 +1676,7 @@ Return JSON only:
     }
   };
 
-  // --- Image upload + Gemini style analysis ---
+  // --- Image upload + Claude style analysis ---
 
   const handleStyleImageUpload = (e) => {
     const file = e.target.files?.[0];
@@ -1699,14 +1703,27 @@ Return JSON only:
 
       const mimeType = styleImageFile.type || "image/png";
 
-      const response = await fetch(TEXT_URL, {
+      const response = await fetch(ANTHROPIC_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...ANTHROPIC_HEADERS },
         body: JSON.stringify({
-          contents: [{
-            parts: [
-              { inlineData: { mimeType, data: base64Data } },
-              { text: `حلل الستايل البصري لهذه الصورة بالتفصيل. أبي تحلل:
+          model: "claude-sonnet-4-6",
+          max_tokens: 512,
+          temperature: 0.7,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: mimeType,
+                  data: base64Data,
+                },
+              },
+              {
+                type: "text",
+                text: `حلل الستايل البصري لهذه الصورة بالتفصيل. أبي تحلل:
 1. الألوان الرئيسية والمزاج اللوني
 2. التكوين والتخطيط البصري
 3. أسلوب الإضاءة
@@ -1716,17 +1733,17 @@ Return JSON only:
 أجب بصيغة JSON فقط بدون أي نص إضافي:
 {"patterns": [{"text": "وصف قصير بالعربي", "weight": 0.0-1.0}, ...]}
 
-اعطني 3-5 أنماط مستخلصة من الصورة. الوزن يعكس مدى وضوح النمط في الصورة.` },
+اعطني 3-5 أنماط مستخلصة من الصورة. الوزن يعكس مدى وضوح النمط في الصورة.`,
+              },
             ],
           }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 512 },
         }),
       });
 
       if (!response.ok) throw new Error(`API Error: ${response.status}`);
 
       const data = await response.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const rawText = data.content?.[0]?.text;
       if (!rawText) throw new Error("لم يتم استلام رد من النموذج");
 
       const result = extractJSON(rawText);
@@ -1762,6 +1779,7 @@ Return JSON only:
     { id: "tip", label: "نصيحة لعب", emoji: "💡", desc: "نصيحة أو حركة هجولة" },
     { id: "season", label: "موسم جديد", emoji: "🌟", desc: "إعلان موسم أو باتل باس" },
     { id: "collab", label: "تعاون", emoji: "🤝", desc: "شراكة أو تعاون مع براند" },
+    { id: "other", label: "أخرى", emoji: "✏️", desc: "نوع بوست مخصص حسب توجيهك" },
   ];
 
   const rejectionReasons = [
@@ -3092,7 +3110,7 @@ Return JSON only:
                     color: PURPLE[400],
                     fontFamily: "monospace",
                   }}>
-                    Hajwalah Agent v{agentLevel}.{agentMemory.totalInteractions} — Gemini AI
+                    Hajwalah Agent v{agentLevel}.{agentMemory.totalInteractions} — Claude AI
                   </div>
                 )}
               </div>
