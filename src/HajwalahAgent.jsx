@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { supabase } from "./supabaseClient";
 
 // ============================================================
 // HAJWALAH CORSA 2 — AI MARKETING AGENT
@@ -406,53 +407,120 @@ const extractJSON = (text) => {
 };
 
 // ============================================================
-// IndexedDB — Style Reference Image Storage
+// Supabase — Cloud Persistence Helpers
 // ============================================================
-const STYLE_REF_DB_NAME = "hajwalah-style-refs";
-const STYLE_REF_DB_VERSION = 1;
-const STYLE_REF_STORE = "images";
 
-const openStyleRefDB = () =>
-  new Promise((resolve, reject) => {
-    const req = indexedDB.open(STYLE_REF_DB_NAME, STYLE_REF_DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STYLE_REF_STORE)) {
-        db.createObjectStore(STYLE_REF_STORE, { keyPath: "id" });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+const AGENT_STATE_ID = "default";
 
-const idbPut = async (record) => {
-  const db = await openStyleRefDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STYLE_REF_STORE, "readwrite");
-    tx.objectStore(STYLE_REF_STORE).put(record);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+const sbFetchPatterns = async () => {
+  const { data, error } = await supabase
+    .from("learned_patterns")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r) => ({
+    id: r.id,
+    pattern: r.pattern,
+    weight: (r.priority ?? 50) / 100,
+    source: r.source || "manual",
+  }));
 };
 
-const idbDelete = async (id) => {
-  const db = await openStyleRefDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STYLE_REF_STORE, "readwrite");
-    tx.objectStore(STYLE_REF_STORE).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+const sbFetchRejections = async () => {
+  const { data, error } = await supabase
+    .from("rejection_reasons")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r) => ({
+    id: r.id,
+    reason: r.reason,
+    type: r.type || "manual",
+    time: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+  }));
 };
 
-const idbGetAll = async () => {
-  const db = await openStyleRefDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STYLE_REF_STORE, "readonly");
-    const req = tx.objectStore(STYLE_REF_STORE).getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+const sbFetchStyleRefs = async () => {
+  const { data, error } = await supabase
+    .from("style_refs")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r) => ({
+    id: r.id,
+    mimeType: r.media_type || "image/jpeg",
+    data: r.image_data,
+    thumbnail: r.thumbnail || `data:${r.media_type || "image/jpeg"};base64,${r.image_data}`,
+    addedAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+  }));
+};
+
+const sbFetchAgentState = async () => {
+  const { data, error } = await supabase
+    .from("agent_state")
+    .select("*")
+    .eq("id", AGENT_STATE_ID)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+};
+
+const sbUpsertAgentState = async (state) => {
+  const { error } = await supabase.from("agent_state").upsert({
+    id: AGENT_STATE_ID,
+    agent_level: state.agentLevel,
+    agent_xp: state.agentXP,
+    total_generated: state.totalGenerated,
+    accepted_count: state.acceptedCount,
+    rejected_count: state.rejectedCount,
+    style_profile: state.agentMemory.styleProfile,
+    scoring_engine: state.agentMemory.scoringEngine,
+    successful_prompts: state.agentMemory.successfulPrompts,
+    total_interactions: state.agentMemory.totalInteractions,
+    updated_at: new Date().toISOString(),
   });
+  if (error) console.warn("Failed to upsert agent state:", error);
+};
+
+const sbInsertPattern = async (pattern) => {
+  const id = crypto.randomUUID();
+  const { error } = await supabase.from("learned_patterns").insert({
+    id,
+    pattern: pattern.pattern,
+    priority: Math.round((pattern.weight ?? 0.7) * 100),
+    performance: 50,
+    source: pattern.source || "manual",
+  });
+  if (error) console.warn("Failed to insert pattern:", error);
+  return id;
+};
+
+const sbInsertRejection = async (rejection) => {
+  const id = crypto.randomUUID();
+  const { error } = await supabase.from("rejection_reasons").insert({
+    id,
+    reason: rejection.reason,
+    type: rejection.type || "manual",
+    post_type: rejection.type !== "manual" ? rejection.type : null,
+  });
+  if (error) console.warn("Failed to insert rejection:", error);
+  return id;
+};
+
+const sbInsertStyleRef = async (record) => {
+  const { error } = await supabase.from("style_refs").insert({
+    id: record.id,
+    name: record.name || null,
+    image_data: record.data,
+    media_type: record.mimeType,
+    thumbnail: record.thumbnail,
+  });
+  if (error) console.warn("Failed to insert style ref:", error);
+};
+
+const sbDeleteRow = async (table, id) => {
+  const { error } = await supabase.from(table).delete().eq("id", id);
+  if (error) console.warn(`Failed to delete from ${table}:`, error);
 };
 
 // Canvas-based image resize for API-safe payloads
@@ -536,17 +604,7 @@ const makeTheme = (dark) => ({
 // MAIN APP
 // ============================================================
 // localStorage helpers
-const STORAGE_KEY = "hajwalah-agent-state";
-
-const loadPersistedState = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.warn("Failed to load persisted state:", e);
-  }
-  return null;
-};
+// localStorage removed — all state now persisted via Supabase
 
 const DEFAULT_MEMORY = {
   styleProfile: {
@@ -707,8 +765,6 @@ const applyFeedbackToMemory = (memory, context, accepted, reason = "") => {
 };
 
 export default function HajwalahAgent() {
-  const saved = useRef(loadPersistedState()).current;
-
   const [darkMode, setDarkMode] = useState(() => {
     try { return localStorage.getItem(DARK_MODE_KEY) === "true"; } catch { return false; }
   });
@@ -723,11 +779,12 @@ export default function HajwalahAgent() {
   };
 
   const [currentPage, setCurrentPage] = useState("home");
-  const [agentLevel, setAgentLevel] = useState(saved?.agentLevel ?? 1);
-  const [agentXP, setAgentXP] = useState(saved?.agentXP ?? 0);
-  const [totalGenerated, setTotalGenerated] = useState(saved?.totalGenerated ?? 0);
-  const [acceptedCount, setAcceptedCount] = useState(saved?.acceptedCount ?? 0);
-  const [rejectedCount, setRejectedCount] = useState(saved?.rejectedCount ?? 0);
+  const [agentLevel, setAgentLevel] = useState(1);
+  const [agentXP, setAgentXP] = useState(0);
+  const [totalGenerated, setTotalGenerated] = useState(0);
+  const [acceptedCount, setAcceptedCount] = useState(0);
+  const [rejectedCount, setRejectedCount] = useState(0);
+  const [supabaseLoading, setSupabaseLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [feedbackGiven, setFeedbackGiven] = useState(false);
@@ -770,34 +827,72 @@ export default function HajwalahAgent() {
   const [trainingToast, setTrainingToast] = useState("");
   const [trainingPreviewIndex, setTrainingPreviewIndex] = useState(null);
 
-  // Agent Memory System — persisted via localStorage
+  // Agent Memory System — persisted via Supabase
   const [agentMemory, setAgentMemory] = useState(
-    normalizeAgentMemory(saved?.agentMemory ?? DEFAULT_MEMORY),
+    normalizeAgentMemory(DEFAULT_MEMORY),
   );
 
-  // Persist agent state to localStorage on every relevant change
+  // Load all data from Supabase on mount
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        agentLevel,
-        agentXP,
-        totalGenerated,
-        acceptedCount,
-        rejectedCount,
-        agentMemory,
-      }));
-    } catch (e) {
-      console.warn("Failed to persist state:", e);
-    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [patterns, rejections, refs, agentState] = await Promise.all([
+          sbFetchPatterns().catch(() => []),
+          sbFetchRejections().catch(() => []),
+          sbFetchStyleRefs().catch(() => []),
+          sbFetchAgentState().catch(() => null),
+        ]);
+        if (cancelled) return;
+
+        // Reconstruct agentMemory from Supabase tables
+        const memoryFromDB = {
+          ...DEFAULT_MEMORY,
+          learnedPatterns: patterns.length > 0 ? patterns : DEFAULT_MEMORY.learnedPatterns,
+          rejectionReasons: rejections,
+          styleProfile: agentState?.style_profile
+            ? { ...DEFAULT_MEMORY.styleProfile, ...agentState.style_profile }
+            : DEFAULT_MEMORY.styleProfile,
+          scoringEngine: agentState?.scoring_engine || DEFAULT_MEMORY.scoringEngine,
+          successfulPrompts: agentState?.successful_prompts || [],
+          totalInteractions: agentState?.total_interactions ?? 0,
+        };
+        setAgentMemory(normalizeAgentMemory(memoryFromDB));
+
+        if (agentState) {
+          setAgentLevel(agentState.agent_level ?? 1);
+          setAgentXP(agentState.agent_xp ?? 0);
+          setTotalGenerated(agentState.total_generated ?? 0);
+          setAcceptedCount(agentState.accepted_count ?? 0);
+          setRejectedCount(agentState.rejected_count ?? 0);
+        }
+
+        setStyleRefs(refs);
+      } catch (err) {
+        console.warn("Failed to load from Supabase:", err);
+      } finally {
+        if (!cancelled) {
+          setSupabaseLoading(false);
+          setStyleRefsLoading(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Sync agent state to Supabase on changes (debounced)
+  const syncTimerRef = useRef(null);
+  const syncToSupabase = useCallback(() => {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      sbUpsertAgentState({ agentLevel, agentXP, totalGenerated, acceptedCount, rejectedCount, agentMemory });
+    }, 1000);
   }, [agentLevel, agentXP, totalGenerated, acceptedCount, rejectedCount, agentMemory]);
 
-  // Load style reference images from IndexedDB on mount
   useEffect(() => {
-    idbGetAll()
-      .then((records) => setStyleRefs(records.sort((a, b) => a.addedAt - b.addedAt)))
-      .catch((err) => console.warn("Failed to load style refs:", err))
-      .finally(() => setStyleRefsLoading(false));
-  }, []);
+    if (supabaseLoading) return;
+    syncToSupabase();
+  }, [supabaseLoading, syncToSupabase]);
 
   useEffect(() => {
     if (trainingPreviewIndex === null) return undefined;
@@ -1194,7 +1289,7 @@ ${textReminder}`;
     }
   };
 
-  const handleFeedback = (accepted, reason = "") => {
+  const handleFeedback = async (accepted, reason = "") => {
     setFeedbackGiven(true);
     if (accepted) {
       setAcceptedCount((p) => p + 1);
@@ -1218,10 +1313,11 @@ ${textReminder}`;
     } else {
       setRejectedCount((p) => p + 1);
       setAgentXP((p) => Math.min(p + 10, 99));
+      const rejectionId = await sbInsertRejection({ reason, type: selectedPostType });
       setAgentMemory((prev) => {
         const withInteraction = {
           ...prev,
-          rejectionReasons: [...prev.rejectionReasons, { reason, type: selectedPostType, time: Date.now() }],
+          rejectionReasons: [...prev.rejectionReasons, { id: rejectionId, reason, type: selectedPostType, time: Date.now() }],
           totalInteractions: prev.totalInteractions + 1,
         };
         return applyFeedbackToMemory(withInteraction, lastGenerationContext, false, reason);
@@ -1231,44 +1327,50 @@ ${textReminder}`;
 
   // --- Manual memory management handlers ---
 
-  const handleAddPattern = () => {
+  const handleAddPattern = async () => {
     const text = newPatternText.trim();
     if (!text) return;
+    const newPattern = { pattern: text, weight: newPatternWeight, source: "manual" };
+    const id = await sbInsertPattern(newPattern);
     setAgentMemory((prev) => ({
       ...prev,
       learnedPatterns: [
         ...prev.learnedPatterns,
-        { pattern: text, weight: newPatternWeight, source: "manual" },
+        { id, ...newPattern },
       ],
     }));
     setNewPatternText("");
     setNewPatternWeight(0.7);
   };
 
-  const handleDeletePattern = (index) => {
+  const handleDeletePattern = async (id) => {
+    await sbDeleteRow("learned_patterns", id);
     setAgentMemory((prev) => ({
       ...prev,
-      learnedPatterns: prev.learnedPatterns.filter((_, i) => i !== index),
+      learnedPatterns: prev.learnedPatterns.filter((p) => p.id !== id),
     }));
   };
 
-  const handleAddRejection = () => {
+  const handleAddRejection = async () => {
     const text = newRejectionText.trim();
     if (!text) return;
+    const newRejection = { reason: text, type: "manual", time: Date.now() };
+    const id = await sbInsertRejection(newRejection);
     setAgentMemory((prev) => ({
       ...prev,
       rejectionReasons: [
         ...prev.rejectionReasons,
-        { reason: text, type: "manual", time: Date.now() },
+        { id, ...newRejection },
       ],
     }));
     setNewRejectionText("");
   };
 
-  const handleDeleteRejection = (index) => {
+  const handleDeleteRejection = async (id) => {
+    await sbDeleteRow("rejection_reasons", id);
     setAgentMemory((prev) => ({
       ...prev,
-      rejectionReasons: prev.rejectionReasons.filter((_, i) => i !== index),
+      rejectionReasons: prev.rejectionReasons.filter((r) => r.id !== id),
     }));
   };
 
@@ -1287,7 +1389,7 @@ ${textReminder}`;
           thumbnail,
           addedAt: Date.now(),
         };
-        await idbPut(record);
+        await sbInsertStyleRef(record);
         setStyleRefs((prev) => [...prev, record]);
       } catch (err) {
         console.warn("Failed to add style ref:", err);
@@ -1298,7 +1400,7 @@ ${textReminder}`;
 
   const handleDeleteStyleRef = async (id) => {
     try {
-      await idbDelete(id);
+      await sbDeleteRow("style_refs", id);
       setStyleRefs((prev) => prev.filter((r) => r.id !== id));
     } catch (err) {
       console.warn("Failed to delete style ref:", err);
@@ -1581,7 +1683,7 @@ ${basePrompt}`;
 
     setTrainingLearning(true);
     try {
-      // 1) Persist all liked images as style references.
+      // 1) Persist all liked images as style references via Supabase.
       const newRefs = [];
       for (const liked of likedItems) {
         const [, payload] = liked.image.split(",");
@@ -1594,7 +1696,7 @@ ${basePrompt}`;
           thumbnail,
           addedAt: Date.now(),
         };
-        await idbPut(record);
+        await sbInsertStyleRef(record);
         newRefs.push(record);
       }
       if (newRefs.length > 0) {
@@ -1664,7 +1766,25 @@ Return JSON only:
         console.warn("Training batch analysis fallback:", err);
       }
 
-      // 3) Update memory + scoring from likes and dislikes together.
+      // 3) Persist new patterns + rejections to Supabase, then update memory.
+      const newPatternIds = [];
+      for (const p of positivePatterns) {
+        const id = await sbInsertPattern({
+          pattern: p.pattern || p.text || "نمط إيجابي من التقييم",
+          weight: Math.max(0.1, Math.min(1, p.weight || 0.82)),
+          source: "training-feedback",
+        });
+        newPatternIds.push(id);
+      }
+      const newRejectionIds = [];
+      for (const p of negativePatterns) {
+        const id = await sbInsertRejection({
+          reason: p.reason || p.pattern || p.text || "نمط غير مرغوب",
+          type: "training",
+        });
+        newRejectionIds.push(id);
+      }
+
       setAgentMemory((prev) => {
         let next = {
           ...prev,
@@ -1682,25 +1802,23 @@ Return JSON only:
         };
 
         if (positivePatterns.length > 0) {
-          next.learnedPatterns = [
-            ...next.learnedPatterns,
-            ...positivePatterns.map((p) => ({
-              pattern: p.pattern || p.text || "نمط إيجابي من التقييم",
-              weight: Math.max(0.1, Math.min(1, p.weight || 0.82)),
-              source: "training-feedback",
-            })),
-          ];
+          const newPatterns = positivePatterns.map((p) => ({
+            id: newPatternIds.shift(),
+            pattern: p.pattern || p.text || "نمط إيجابي من التقييم",
+            weight: Math.max(0.1, Math.min(1, p.weight || 0.82)),
+            source: "training-feedback",
+          }));
+          next.learnedPatterns = [...next.learnedPatterns, ...newPatterns];
         }
 
         if (negativePatterns.length > 0) {
-          next.rejectionReasons = [
-            ...next.rejectionReasons,
-            ...negativePatterns.map((p) => ({
-              reason: p.reason || p.pattern || p.text || "نمط غير مرغوب",
-              type: "training",
-              time: Date.now(),
-            })),
-          ];
+          const newRejections = negativePatterns.map((p) => ({
+            id: newRejectionIds.shift(),
+            reason: p.reason || p.pattern || p.text || "نمط غير مرغوب",
+            type: "training",
+            time: Date.now(),
+          }));
+          next.rejectionReasons = [...next.rejectionReasons, ...newRejections];
         }
 
         for (const item of likedItems) {
@@ -1802,16 +1920,19 @@ Return JSON only:
       setStyleAnalysisResult(result);
 
       if (result.patterns && Array.isArray(result.patterns)) {
+        const patternsWithIds = [];
+        for (const p of result.patterns) {
+          const newP = {
+            pattern: p.text,
+            weight: Math.max(0.1, Math.min(1, p.weight || 0.6)),
+            source: "image-analysis",
+          };
+          const id = await sbInsertPattern(newP);
+          patternsWithIds.push({ id, ...newP });
+        }
         setAgentMemory((prev) => ({
           ...prev,
-          learnedPatterns: [
-            ...prev.learnedPatterns,
-            ...result.patterns.map((p) => ({
-              pattern: p.text,
-              weight: Math.max(0.1, Math.min(1, p.weight || 0.6)),
-              source: "image-analysis",
-            })),
-          ],
+          learnedPatterns: [...prev.learnedPatterns, ...patternsWithIds],
         }));
       }
     } catch (err) {
@@ -3607,7 +3728,7 @@ Return JSON only:
           <span>📚</span> الأنماط المتعلمة
         </h3>
         {agentMemory.learnedPatterns.map((p, i) => (
-          <div key={i} style={{
+          <div key={p.id || i} style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -3648,7 +3769,7 @@ Return JSON only:
                 {Math.round(p.weight * 100)}%
               </span>
               <button
-                onClick={() => handleDeletePattern(i)}
+                onClick={() => handleDeletePattern(p.id)}
                 style={{
                   background: "none",
                   border: "none",
@@ -4110,7 +4231,7 @@ Return JSON only:
           </p>
         ) : (
           agentMemory.rejectionReasons.map((r, i) => (
-            <div key={i} style={{
+            <div key={r.id || i} style={{
               display: "flex",
               alignItems: "center",
               gap: 10,
@@ -4129,7 +4250,7 @@ Return JSON only:
                 {r.type === "manual" ? "يدوي" : `بوست: ${postTypes.find((pt) => pt.id === r.type)?.label || r.type}`}
               </span>
               <button
-                onClick={() => handleDeleteRejection(i)}
+                onClick={() => handleDeleteRejection(r.id)}
                 style={{
                   background: "none",
                   border: "none",
@@ -4477,6 +4598,28 @@ Return JSON only:
       </div>
     </div>
   );
+
+  if (supabaseLoading) {
+    return (
+      <div dir="rtl" style={{
+        minHeight: "100vh",
+        background: T.pageBg,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Tajawal', 'Segoe UI', sans-serif",
+        color: T.text,
+      }}>
+        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
+        <div style={{ fontSize: 48, marginBottom: 16, animation: "spin 1.5s linear infinite" }}>🤖</div>
+        <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'Tajawal', sans-serif" }}>
+          جاري تحميل بيانات الوكيل...
+        </div>
+        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   return (
     <div
