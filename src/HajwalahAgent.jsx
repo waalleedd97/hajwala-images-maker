@@ -823,6 +823,7 @@ export default function HajwalahAgent() {
   const [isPreparingTraining, setIsPreparingTraining] = useState(false);
   const [trainingLikedIndexes, setTrainingLikedIndexes] = useState([]);
   const [trainingDislikedIndexes, setTrainingDislikedIndexes] = useState([]);
+  const [trainingComments, setTrainingComments] = useState({});
   const [trainingLearning, setTrainingLearning] = useState(false);
   const [trainingToast, setTrainingToast] = useState("");
   const [trainingPreviewIndex, setTrainingPreviewIndex] = useState(null);
@@ -1121,8 +1122,30 @@ ${textInstruction}
 ✅ USER TEXT OVERRIDE — Render this EXACT text on the image:
 "${userExplicitText}"
 - Copy it letter-for-letter. Do NOT translate, summarize, or modify it.
-- Place it prominently using ${sp.arabicFont} style, positioned at ${sp.textPlacement}.
-- Besides this exact string, do NOT add any other text, labels, hashtags, or watermarks.`
+- Besides this exact string, do NOT add any other text, labels, hashtags, or watermarks.
+
+DESIGN INTELLIGENCE — TEXT STYLING (adapt to each design):
+Core principle: The background is chosen FIRST, then text styling adapts to it.
+Look at the background and ask "what text treatment makes this feel alive?"
+
+TEXT COLOR — choose based on background harmony, never force a fixed color:
+- Dark/blue background → white or gold text
+- Warm/orange background → white or dark red text
+- Always ensure strong contrast, but match the overall palette
+
+TEXT SIZING — use intentional size variation for visual hierarchy:
+- Pick ONE key element (a number, word, or short phrase) and give it oversized treatment
+- Supporting text stays noticeably smaller
+- Never make everything the same size
+
+TEXT EMPHASIS — choose the ONE technique that fits THIS specific design:
+- Oversized text: for the single most important word or number
+- Text background pill/banner: when text sits over a busy/complex background
+- Drop shadow or outline: when text overlays a detailed scene
+- Bold + color shift: for secondary highlights
+- Do NOT apply all techniques at once — pick what serves this background best
+
+MOOD: Professional mobile game ad — dynamic, human-crafted feel, not template-generated.`
         : `
 ⛔⛔⛔ ABSOLUTE RULE — ZERO TEXT ON IMAGE ⛔⛔⛔
 - DO NOT render, write, draw, or overlay ANY text, letters, words, numbers, or symbols
@@ -1134,15 +1157,19 @@ ${textInstruction}
 ⛔⛔⛔ END ABSOLUTE RULE ⛔⛔⛔`;
 
       const textReminder = userExplicitText
-        ? `REMINDER: Render ONLY this exact text: "${userExplicitText}" — nothing else.`
+        ? `REMINDER: Render ONLY this exact text: "${userExplicitText}" — style it with design intelligence based on the background. No other text.`
         : `REMINDER: The final image must contain ZERO text. Purely visual.`;
 
       // When text override is active, build the scene description with a positive text-rendering command
       const sceneBlock = userExplicitText
-        ? `Render the following Arabic text visually on the image in large, clear, bold typography centered prominently:
+        ? `BACKGROUND SCENE (render this first, then add text on top):
+${baseImagePrompt}
+
+TEXT TO RENDER on top of the scene:
 "${userExplicitText}"
-The text must be the focal visual element. Use ${sp.arabicFont} style font, ${sp.textPlacement} placement.
-BACKGROUND SCENE: ${baseImagePrompt}`
+- Use ${sp.arabicFont} style font, positioned at ${sp.textPlacement}
+- Apply the design intelligence rules above: choose text color, size hierarchy, and emphasis technique based on how the background actually looks
+- The result should feel like a professional mobile game ad, not a template`
         : baseImagePrompt;
 
       const imagePromptText = hasStyleRefs
@@ -1506,6 +1533,7 @@ Return JSON only:
     setIsPreparingTraining(true);
     setTrainingLikedIndexes([]);
     setTrainingDislikedIndexes([]);
+    setTrainingComments({});
     setTrainingToast("");
     setTrainingPreviewIndex(null);
     setTrainingPlanSource("");
@@ -1677,11 +1705,14 @@ ${basePrompt}`;
 
     const likedSet = new Set(trainingLikedIndexes);
     const dislikedSet = new Set(trainingDislikedIndexes);
-    const likedItems = doneImages.filter(({ index }) => likedSet.has(index)).map(({ item }) => item);
-    const dislikedItems = doneImages.filter(({ index }) => dislikedSet.has(index)).map(({ item }) => item);
+    const likedItems = doneImages.filter(({ index }) => likedSet.has(index)).map(({ item, index }) => ({ ...item, _comment: trainingComments[index] || "" }));
+    const dislikedItems = doneImages.filter(({ index }) => dislikedSet.has(index)).map(({ item, index }) => ({ ...item, _comment: trainingComments[index] || "" }));
+    const neutralItems = doneImages
+      .filter(({ index }) => !likedSet.has(index) && !dislikedSet.has(index) && trainingComments[index]?.trim())
+      .map(({ item, index }) => ({ ...item, _comment: trainingComments[index] }));
 
-    if (likedItems.length === 0 && dislikedItems.length === 0) {
-      setTrainingToast("حدد على الأقل صورة واحدة بلايك أو دسلايك أولًا");
+    if (likedItems.length === 0 && dislikedItems.length === 0 && neutralItems.length === 0) {
+      setTrainingToast("حدد على الأقل صورة واحدة بلايك أو دسلايك أو اكتب ملاحظة");
       setTimeout(() => setTrainingToast(""), 3500);
       return;
     }
@@ -1708,25 +1739,37 @@ ${basePrompt}`;
         setStyleRefs((prev) => [...prev, ...newRefs]);
       }
 
-      // 2) Ask model to extract both positive and negative visual signals.
+      // 2) Ask model to extract positive, negative, and neutral visual signals.
+      const formatItem = (t, i, tag) => {
+        let block = `[${tag} ${i + 1}] label: ${t.label}\ndirection: ${t.direction || ""}\nprompt: ${t.prompt}`;
+        if (t._comment) block += `\nuser_comment: "${t._comment}"`;
+        return block;
+      };
       const likedPromptBlock = likedItems.length > 0
-        ? likedItems.map((t, i) => `[LIKE ${i + 1}] label: ${t.label}\ndirection: ${t.direction || ""}\nprompt: ${t.prompt}`).join("\n\n")
+        ? likedItems.map((t, i) => formatItem(t, i, "LIKE")).join("\n\n")
         : "none";
       const dislikedPromptBlock = dislikedItems.length > 0
-        ? dislikedItems.map((t, i) => `[DISLIKE ${i + 1}] label: ${t.label}\ndirection: ${t.direction || ""}\nprompt: ${t.prompt}`).join("\n\n")
+        ? dislikedItems.map((t, i) => formatItem(t, i, "DISLIKE")).join("\n\n")
+        : "none";
+      const neutralPromptBlock = neutralItems.length > 0
+        ? neutralItems.map((t, i) => formatItem(t, i, "NEUTRAL")).join("\n\n")
         : "none";
 
       const analysisPrompt = `The user has rated a batch of generated drift images.
 
-LIKED prompts:
+LIKED images:
 ${likedPromptBlock}
 
-DISLIKED prompts:
+DISLIKED images:
 ${dislikedPromptBlock}
 
-Analyze both sides and return concise structured learning:
-- positivePatterns: what should be reinforced
-- negativePatterns: what should be avoided
+NEUTRAL images (no like/dislike, but user left a comment):
+${neutralPromptBlock}
+
+RULES:
+- If a user_comment exists for an image, treat it as a PRECISE correction request — higher priority than the general liked/disliked signal. Extract it as a specific actionable pattern (positive or negative).
+- For NEUTRAL images: do NOT boost or penalize scores. Only extract the user_comment as a directional learned pattern.
+- Analyze all sides and return concise structured learning.
 
 Return JSON only:
 {
@@ -1835,11 +1878,14 @@ Return JSON only:
         return next;
       });
 
-      setTrainingToast(
-        `تم التعلم من ${likedItems.length} لايك و ${dislikedItems.length} دسلايك`,
-      );
+      const parts = [];
+      if (likedItems.length > 0) parts.push(`${likedItems.length} لايك`);
+      if (dislikedItems.length > 0) parts.push(`${dislikedItems.length} دسلايك`);
+      if (neutralItems.length > 0) parts.push(`${neutralItems.length} ملاحظة`);
+      setTrainingToast(`تم التعلم من ${parts.join(" و ")}`);
       setTrainingLikedIndexes([]);
       setTrainingDislikedIndexes([]);
+      setTrainingComments({});
     } catch (err) {
       console.warn("Training feedback analysis error:", err);
       setTrainingToast("صار خطأ أثناء تحليل التقييمات");
@@ -2272,7 +2318,7 @@ Return JSON only:
   const renderGenerate = () => (
     <div style={{ animation: "fadeUp 0.6s ease", maxWidth: 800, margin: "0 auto", padding: "40px 20px" }}>
       <button
-        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setLastGenerationContext(null); setTrainingMode(false); setTrainingImages([]); setTrainingDirections([]); setTrainingPlanSource(""); setTrainingLikedIndexes([]); setTrainingDislikedIndexes([]); setTrainingPreviewIndex(null); }}
+        onClick={() => { setCurrentPage("home"); setShowResult(false); setSelectedPostType(null); setGeneratedContent(null); setGeneratedImage(null); setGenerateError(null); setLastGenerationContext(null); setTrainingMode(false); setTrainingImages([]); setTrainingDirections([]); setTrainingPlanSource(""); setTrainingLikedIndexes([]); setTrainingDislikedIndexes([]); setTrainingComments({}); setTrainingPreviewIndex(null); }}
         style={{
           background: "none",
           border: "none",
@@ -2491,6 +2537,7 @@ Return JSON only:
                 setTrainingPlanSource("");
                 setTrainingLikedIndexes([]);
                 setTrainingDislikedIndexes([]);
+                setTrainingComments({});
               }
               setTrainingMode(!trainingMode);
             }}
@@ -2673,22 +2720,22 @@ Return JSON only:
                   </div>
                   <button
                     onClick={handleAnalyzeTrainingFeedback}
-                    disabled={trainingLearning || (trainingLikedIndexes.length === 0 && trainingDislikedIndexes.length === 0)}
+                    disabled={trainingLearning || (trainingLikedIndexes.length === 0 && trainingDislikedIndexes.length === 0 && Object.values(trainingComments).every((c) => !c?.trim()))}
                     style={{
-                      background: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0) && !trainingLearning
+                      background: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0 || Object.values(trainingComments).some((c) => c?.trim())) && !trainingLearning
                         ? "linear-gradient(135deg, #059669, #047857)"
                         : "#e2e8f0",
-                      color: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0) && !trainingLearning ? "white" : "#94a3b8",
+                      color: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0 || Object.values(trainingComments).some((c) => c?.trim())) && !trainingLearning ? "white" : "#94a3b8",
                       border: "none",
                       borderRadius: 12,
                       padding: "9px 14px",
                       fontSize: 13,
                       fontWeight: 700,
                       fontFamily: "'Tajawal', sans-serif",
-                      cursor: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0) && !trainingLearning ? "pointer" : "not-allowed",
+                      cursor: (trainingLikedIndexes.length > 0 || trainingDislikedIndexes.length > 0 || Object.values(trainingComments).some((c) => c?.trim())) && !trainingLearning ? "pointer" : "not-allowed",
                     }}
                   >
-                    {trainingLearning ? "⏳ تحليل التقييمات..." : "🧠 حلل اللايك/الدسلايك"}
+                    {trainingLearning ? "⏳ تحليل التقييمات..." : "🧠 حلل التقييمات والملاحظات"}
                   </button>
                 </div>
               )}
@@ -2896,6 +2943,31 @@ Return JSON only:
                             </div>
                           )}
                         </div>
+                        {item.status === "done" && item.image && (
+                          <input
+                            type="text"
+                            value={trainingComments[i] || ""}
+                            onChange={(e) => setTrainingComments((prev) => ({ ...prev, [i]: e.target.value }))}
+                            placeholder="اكتب ملاحظتك على هذه الصورة..."
+                            disabled={trainingLearning}
+                            style={{
+                              width: "100%",
+                              marginTop: 6,
+                              padding: "6px 10px",
+                              borderRadius: 8,
+                              border: `1px solid ${T.inputBorder}`,
+                              background: T.inputBg,
+                              color: T.text,
+                              fontSize: 12,
+                              fontFamily: "'Tajawal', sans-serif",
+                              direction: "rtl",
+                              outline: "none",
+                              opacity: trainingLearning ? 0.6 : 1,
+                            }}
+                            onFocus={(e) => e.target.style.borderColor = "#f59e0b"}
+                            onBlur={(e) => e.target.style.borderColor = T.inputBorder}
+                          />
+                        )}
                       </div>
                     </div>
                       );
