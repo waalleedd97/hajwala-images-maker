@@ -1317,6 +1317,11 @@ Never generate a road, street, or environment scene without a car in it.
 If the post topic does not mention a specific car, default to a Saudi drifting/racing scene with a visible car.
 A carless image is considered a generation failure.
 
+CAR DIRECTION RULE:
+All cars must face the exact same direction — always driving toward the same vanishing point on the horizon.
+It is strictly forbidden for any car to face opposite, mirror, or perpendicular to another car in the scene.
+Imagine all cars are on a one-way road moving in the same direction.
+
 IMPORTANT: Generate a CLEAN background scene only.
 - Do NOT draw any text
 - Do NOT draw any dark rectangles, boxes, panels, or placeholders
@@ -4353,6 +4358,7 @@ Return JSON only:
         </div>
         {[
           "كل صورة يجب أن تحتوي على سيارة واضحة وبارزة في المقدمة",
+          "جميع السيارات تسير في نفس الاتجاه نحو نقطة الأفق — ممنوع أي سيارة تكون معكوسة أو مواجهة للأخرى",
           "لا توجد مستطيلات أو صناديق داكنة أو أماكن محجوزة للنص",
           "الصورة خلفية نظيفة فقط — النص يُضاف برمجياً",
         ].map((rule, i) => (
