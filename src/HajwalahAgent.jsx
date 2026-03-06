@@ -925,23 +925,8 @@ export default function HajwalahAgent() {
 
         const W = canvas.width;
         const H = canvas.height;
-        const maxTextW = W * 0.85;
-
-        // Top gradient overlay (top 28%)
-        const topH = H * 0.28;
-        const topGrad = ctx.createLinearGradient(0, 0, 0, topH);
-        topGrad.addColorStop(0, "rgba(0,0,0,0.75)");
-        topGrad.addColorStop(1, "transparent");
-        ctx.fillStyle = topGrad;
-        ctx.fillRect(0, 0, W, topH);
-
-        // Bottom gradient overlay (bottom 22%)
-        const botH = H * 0.22;
-        const botGrad = ctx.createLinearGradient(0, H - botH, 0, H);
-        botGrad.addColorStop(0, "transparent");
-        botGrad.addColorStop(1, "rgba(0,0,0,0.80)");
-        ctx.fillStyle = botGrad;
-        ctx.fillRect(0, H - botH, W, botH);
+        const s = W / 1024; // scale factor
+        const maxTextW = W * 0.78;
 
         // Helper: wrap text into lines
         const wrapText = (text, font, maxW) => {
@@ -962,51 +947,138 @@ export default function HajwalahAgent() {
           return lines;
         };
 
+        // Helper: rounded rect
+        const roundRect = (x, y, w, h, r) => {
+          ctx.beginPath();
+          ctx.moveTo(x + r, y);
+          ctx.lineTo(x + w - r, y);
+          ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+          ctx.lineTo(x + w, y + h - r);
+          ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+          ctx.lineTo(x + r, y + h);
+          ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+          ctx.lineTo(x, y + r);
+          ctx.quadraticCurveTo(x, y, x + r, y);
+          ctx.closePath();
+        };
+
+        const resetShadow = () => {
+          ctx.shadowColor = "transparent";
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+        };
+
         ctx.textAlign = "center";
         ctx.direction = "rtl";
 
-        // Title text (top zone)
+        // Title pill (top zone)
         if (title) {
-          const titleFont = `bold ${Math.round(54 * (W / 1024))}px 'Tajawal', sans-serif`;
+          const fontSize = Math.round(54 * s);
+          const titleFont = `bold ${fontSize}px 'Tajawal', sans-serif`;
           const titleLines = wrapText(title, titleFont, maxTextW);
           ctx.font = titleFont;
-          ctx.fillStyle = "#FFFFFF";
-          ctx.shadowColor = "rgba(0,0,0,0.95)";
-          ctx.shadowBlur = 10;
-          ctx.shadowOffsetX = 3;
-          ctx.shadowOffsetY = 3;
-          const lineH = Math.round(54 * (W / 1024) * 1.4);
+          const lineH = Math.round(fontSize * 1.4);
           const totalTextH = titleLines.length * lineH;
-          let y = (topH - totalTextH) / 2 + lineH * 0.8;
+          const padX = Math.round(16 * s);
+          const padY = Math.round(10 * s);
+          const accentW = Math.round(3 * s);
+
+          // Measure widest line
+          let pillW = 0;
+          for (const ln of titleLines) {
+            const w = ctx.measureText(ln).width;
+            if (w > pillW) pillW = w;
+          }
+          pillW += padX * 2 + accentW + Math.round(8 * s);
+          const pillH = totalTextH + padY * 2;
+          const pillX = (W - pillW) / 2;
+          const pillY = H * 0.06;
+          const pillR = Math.round(14 * s);
+
+          // Draw pill background with shadow
+          ctx.shadowColor = "rgba(0,0,0,0.6)";
+          ctx.shadowBlur = Math.round(16 * s);
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = Math.round(4 * s);
+          roundRect(pillX, pillY, pillW, pillH, pillR);
+          ctx.fillStyle = "rgba(0,0,0,0.45)";
+          ctx.fill();
+          resetShadow();
+
+          // Right accent bar (RTL — right side)
+          const barX = pillX + pillW - accentW;
+          ctx.fillStyle = "rgba(255,255,255,0.85)";
+          roundRect(barX, pillY + Math.round(6 * s), accentW, pillH - Math.round(12 * s), accentW / 2);
+          ctx.fill();
+
+          // Draw title text
+          ctx.font = titleFont;
+          ctx.fillStyle = "#FFFFFF";
+          ctx.shadowColor = "rgba(0,0,0,0.9)";
+          ctx.shadowBlur = Math.round(12 * s);
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = Math.round(2 * s);
+          let y = pillY + padY + lineH * 0.78;
           for (const ln of titleLines) {
             ctx.fillText(ln, W / 2, y);
             y += lineH;
           }
+          resetShadow();
         }
 
-        // CTA text (bottom zone)
+        // CTA pill (bottom zone)
         if (ctaText) {
-          const ctaFont = `bold ${Math.round(40 * (W / 1024))}px 'Tajawal', sans-serif`;
-          const ctaLines = wrapText(ctaText, ctaFont, maxTextW);
+          const fontSize = Math.round(40 * s);
+          const ctaFont = `bold ${fontSize}px 'Tajawal', sans-serif`;
+          const arrowText = " →";
+          const ctaWithArrow = ctaText + arrowText;
+          const ctaLines = wrapText(ctaWithArrow, ctaFont, maxTextW);
           ctx.font = ctaFont;
-          ctx.fillStyle = "#FFD700";
-          ctx.shadowColor = "rgba(0,0,0,0.95)";
-          ctx.shadowBlur = 8;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-          const lineH = Math.round(40 * (W / 1024) * 1.4);
+          const lineH = Math.round(fontSize * 1.4);
           const totalTextH = ctaLines.length * lineH;
-          let y = H - botH + (botH - totalTextH) / 2 + lineH * 0.8;
+          const padX = Math.round(18 * s);
+          const padY = Math.round(12 * s);
+
+          // Measure widest line
+          let pillW = 0;
+          for (const ln of ctaLines) {
+            const w = ctx.measureText(ln).width;
+            if (w > pillW) pillW = w;
+          }
+          pillW += padX * 2;
+          const pillH = totalTextH + padY * 2;
+          const pillX = (W - pillW) / 2;
+          const pillY = H - H * 0.06 - pillH;
+          const pillR = Math.round(14 * s);
+
+          // Draw gold pill with shadow
+          ctx.shadowColor = "rgba(0,0,0,0.6)";
+          ctx.shadowBlur = Math.round(20 * s);
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = Math.round(4 * s);
+          roundRect(pillX, pillY, pillW, pillH, pillR);
+          const goldGrad = ctx.createLinearGradient(pillX, 0, pillX + pillW, 0);
+          goldGrad.addColorStop(0, "#f59e0b");
+          goldGrad.addColorStop(1, "#d97706");
+          ctx.fillStyle = goldGrad;
+          ctx.fill();
+          resetShadow();
+
+          // Draw CTA text
+          ctx.font = ctaFont;
+          ctx.fillStyle = "#FFFFFF";
+          ctx.shadowColor = "rgba(0,0,0,0.3)";
+          ctx.shadowBlur = Math.round(4 * s);
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = Math.round(1 * s);
+          let y = pillY + padY + lineH * 0.78;
           for (const ln of ctaLines) {
             ctx.fillText(ln, W / 2, y);
             y += lineH;
           }
+          resetShadow();
         }
-
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
 
         resolve(canvas.toDataURL("image/png"));
       };
