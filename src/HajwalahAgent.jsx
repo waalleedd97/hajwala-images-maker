@@ -496,6 +496,43 @@ const resizeImageToBase64 = (file, maxDim = 512) =>
   });
 
 // ============================================================
+// DARK MODE THEME
+// ============================================================
+const DARK_MODE_KEY = "hajwalah-dark-mode";
+
+const makeTheme = (dark) => ({
+  dark,
+  pageBg: dark
+    ? "linear-gradient(180deg, #0f0a1a 0%, #1a1028 30%, #0f0a1a 100%)"
+    : "linear-gradient(180deg, #faf5ff 0%, #ffffff 30%, #faf5ff 100%)",
+  cardBg: dark ? "#1e1730" : "white",
+  cardBorder: dark ? PURPLE[800] : PURPLE[100],
+  navBg: dark ? "rgba(15,10,26,0.88)" : "rgba(255,255,255,0.85)",
+  navBorder: dark ? PURPLE[900] : PURPLE[100],
+  text: dark ? "#e2e8f0" : PURPLE[900],
+  textSecondary: dark ? "#94a3b8" : "#64748b",
+  textMuted: dark ? "#64748b" : "#94a3b8",
+  inputBg: dark ? "#261e38" : "white",
+  inputBorder: dark ? PURPLE[700] : PURPLE[100],
+  softBg: dark ? "#261e38" : PURPLE[50],
+  softBorder: dark ? PURPLE[700] : PURPLE[200],
+  tagBg: dark ? "rgba(147,51,234,0.2)" : "white",
+  tagBorder: dark ? PURPLE[700] : PURPLE[200],
+  tagText: dark ? PURPLE[200] : PURPLE[700],
+  navBtnBg: dark ? PURPLE[900] : PURPLE[100],
+  navBtnText: dark ? PURPLE[200] : PURPLE[800],
+  navBtnInactive: dark ? "#94a3b8" : "#64748b",
+  logoText: dark ? PURPLE[200] : PURPLE[800],
+  successBg: dark ? "rgba(5,150,105,0.15)" : "#ecfdf5",
+  successBorder: dark ? "#065f46" : "#bbf7d0",
+  successText: dark ? "#34d399" : "#059669",
+  errorBg: dark ? "rgba(220,38,38,0.15)" : "#fef2f2",
+  errorBorder: dark ? "#7f1d1d" : "#fecaca",
+  errorText: dark ? "#fca5a5" : "#dc2626",
+  scrollThumb: dark ? PURPLE[700] : PURPLE[200],
+});
+
+// ============================================================
 // MAIN APP
 // ============================================================
 // localStorage helpers
@@ -671,6 +708,19 @@ const applyFeedbackToMemory = (memory, context, accepted, reason = "") => {
 
 export default function HajwalahAgent() {
   const saved = useRef(loadPersistedState()).current;
+
+  const [darkMode, setDarkMode] = useState(() => {
+    try { return localStorage.getItem(DARK_MODE_KEY) === "true"; } catch { return false; }
+  });
+  const T = makeTheme(darkMode);
+
+  const toggleDarkMode = () => {
+    setDarkMode((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(DARK_MODE_KEY, String(next)); } catch {}
+      return next;
+    });
+  };
 
   const [currentPage, setCurrentPage] = useState("home");
   const [agentLevel, setAgentLevel] = useState(saved?.agentLevel ?? 1);
@@ -1810,10 +1860,10 @@ Return JSON only:
           borderRadius: 40,
           padding: "8px 20px",
           marginBottom: 24,
-          border: `1px solid ${PURPLE[200]}`,
+          border: `1px solid ${T.softBorder}`,
         }}>
           <span>🤖</span>
-          <span style={{ color: PURPLE[700], fontWeight: 600, fontSize: 14 }}>
+          <span style={{ color: T.tagText, fontWeight: 600, fontSize: 14 }}>
             الوكيل الذكي — الإصدار ٢.٠
           </span>
         </div>
@@ -1834,7 +1884,7 @@ Return JSON only:
         </h1>
 
         <p style={{
-          color: "#64748b",
+          color: T.textSecondary,
           fontSize: 17,
           maxWidth: 520,
           margin: "0 auto 40px",
@@ -1869,9 +1919,9 @@ Return JSON only:
           <button
             onClick={() => setShowArchitecture(true)}
             style={{
-              background: "white",
-              color: PURPLE[700],
-              border: `2px solid ${PURPLE[200]}`,
+              background: T.cardBg,
+              color: T.tagText,
+              border: `2px solid ${T.softBorder}`,
               padding: "16px 36px",
               borderRadius: 16,
               fontSize: 17,
@@ -1880,8 +1930,8 @@ Return JSON only:
               transition: "all 0.3s",
               fontFamily: "'Tajawal', sans-serif",
             }}
-            onMouseOver={(e) => e.target.style.background = PURPLE[50]}
-            onMouseOut={(e) => e.target.style.background = "white"}
+            onMouseOver={(e) => e.target.style.background = T.softBg}
+            onMouseOut={(e) => e.target.style.background = T.cardBg}
           >
             🏗️ كيف يشتغل الوكيل؟
           </button>
@@ -1904,16 +1954,16 @@ Return JSON only:
           { label: "مرفوضة", value: rejectedCount, icon: "❌" },
         ].map((s, i) => (
           <div key={i} style={{
-            background: "white",
+            background: T.cardBg,
             borderRadius: 20,
             padding: "20px 16px",
             textAlign: "center",
-            border: `1px solid ${PURPLE[100]}`,
-            boxShadow: "0 4px 20px rgba(147,51,234,0.06)",
+            border: `1px solid ${T.cardBorder}`,
+            boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(147,51,234,0.06)",
           }}>
             <div style={{ fontSize: 28 }}>{s.icon}</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: PURPLE[800], marginTop: 4 }}>{s.value}</div>
-            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 2, fontFamily: "'Tajawal', sans-serif" }}>{s.label}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, marginTop: 4 }}>{s.value}</div>
+            <div style={{ fontSize: 13, color: T.textMuted, marginTop: 2, fontFamily: "'Tajawal', sans-serif" }}>{s.label}</div>
           </div>
         ))}
       </div>
@@ -1924,7 +1974,7 @@ Return JSON only:
           textAlign: "center",
           fontSize: 26,
           fontWeight: 800,
-          color: PURPLE[900],
+          color: T.text,
           marginBottom: 32,
           fontFamily: "'Tajawal', sans-serif",
         }}>
@@ -1973,21 +2023,21 @@ Return JSON only:
             <div
               key={i}
               style={{
-                background: "white",
+                background: T.cardBg,
                 borderRadius: 24,
                 padding: 28,
-                border: `1px solid ${PURPLE[100]}`,
-                boxShadow: "0 4px 24px rgba(147,51,234,0.06)",
+                border: `1px solid ${T.cardBorder}`,
+                boxShadow: darkMode ? "0 4px 24px rgba(0,0,0,0.2)" : "0 4px 24px rgba(147,51,234,0.06)",
                 transition: "all 0.3s",
                 cursor: "default",
               }}
               onMouseOver={(e) => {
                 e.currentTarget.style.transform = "translateY(-4px)";
-                e.currentTarget.style.boxShadow = "0 12px 40px rgba(147,51,234,0.12)";
+                e.currentTarget.style.boxShadow = darkMode ? "0 12px 40px rgba(0,0,0,0.35)" : "0 12px 40px rgba(147,51,234,0.12)";
               }}
               onMouseOut={(e) => {
                 e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 4px 24px rgba(147,51,234,0.06)";
+                e.currentTarget.style.boxShadow = darkMode ? "0 4px 24px rgba(0,0,0,0.2)" : "0 4px 24px rgba(147,51,234,0.06)";
               }}
             >
               <div style={{ marginBottom: 16 }}>
@@ -1996,7 +2046,7 @@ Return JSON only:
               <h3 style={{
                 fontSize: 18,
                 fontWeight: 700,
-                color: PURPLE[900],
+                color: T.text,
                 marginBottom: 8,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
@@ -2004,7 +2054,7 @@ Return JSON only:
               </h3>
               <p style={{
                 fontSize: 14,
-                color: "#64748b",
+                color: T.textSecondary,
                 lineHeight: 1.8,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
@@ -2022,26 +2072,26 @@ Return JSON only:
         padding: "0 20px",
       }}>
         <div style={{
-          background: "white",
+          background: T.cardBg,
           borderRadius: 24,
           padding: 32,
-          border: `1px solid ${PURPLE[100]}`,
-          boxShadow: "0 4px 24px rgba(147,51,234,0.06)",
+          border: `1px solid ${T.cardBorder}`,
+          boxShadow: darkMode ? "0 4px 24px rgba(0,0,0,0.2)" : "0 4px 24px rgba(147,51,234,0.06)",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
             <Icon3D type="star" size={40} />
             <div>
-              <h3 style={{ fontSize: 18, fontWeight: 700, color: PURPLE[900], fontFamily: "'Tajawal', sans-serif" }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, color: T.text, fontFamily: "'Tajawal', sans-serif" }}>
                 مستوى ثقة الوكيل
               </h3>
-              <p style={{ fontSize: 13, color: "#94a3b8", fontFamily: "'Tajawal', sans-serif" }}>
+              <p style={{ fontSize: 13, color: T.textMuted, fontFamily: "'Tajawal', sans-serif" }}>
                 كل ما زادت التفاعلات، زادت الثقة
               </p>
             </div>
           </div>
 
           <div style={{
-            background: PURPLE[50],
+            background: T.softBg,
             borderRadius: 12,
             height: 24,
             overflow: "hidden",
@@ -2060,7 +2110,7 @@ Return JSON only:
             display: "flex",
             justifyContent: "space-between",
             fontSize: 12,
-            color: "#94a3b8",
+            color: T.textMuted,
             fontFamily: "'Tajawal', sans-serif",
           }}>
             <span>مبتدئ 🌱</span>
@@ -2072,10 +2122,10 @@ Return JSON only:
           <div style={{
             marginTop: 20,
             padding: 16,
-            background: PURPLE[50],
+            background: T.softBg,
             borderRadius: 16,
             fontSize: 14,
-            color: PURPLE[700],
+            color: T.tagText,
             lineHeight: 1.8,
             fontFamily: "'Tajawal', sans-serif",
           }}>
@@ -2100,7 +2150,7 @@ Return JSON only:
         style={{
           background: "none",
           border: "none",
-          color: PURPLE[600],
+          color: T.tagText,
           fontSize: 15,
           cursor: "pointer",
           marginBottom: 24,
@@ -2114,14 +2164,14 @@ Return JSON only:
       <h2 style={{
         fontSize: 30,
         fontWeight: 800,
-        color: PURPLE[900],
+        color: T.text,
         marginBottom: 8,
         fontFamily: "'Tajawal', sans-serif",
       }}>
         ✨ مولّد البوستات الذكي
       </h2>
       <p style={{
-        color: "#64748b",
+        color: T.textSecondary,
         fontSize: 15,
         marginBottom: 32,
         fontFamily: "'Tajawal', sans-serif",
@@ -2136,7 +2186,7 @@ Return JSON only:
             <h3 style={{
               fontSize: 16,
               fontWeight: 700,
-              color: PURPLE[800],
+              color: T.text,
               marginBottom: 16,
               fontFamily: "'Tajawal', sans-serif",
             }}>
@@ -2148,9 +2198,9 @@ Return JSON only:
                   key={pt.id}
                   onClick={() => setSelectedPostType(pt.id)}
                   style={{
-                    background: selectedPostType === pt.id ? `linear-gradient(135deg, ${PURPLE[600]}, ${PURPLE[800]})` : "white",
-                    color: selectedPostType === pt.id ? "white" : PURPLE[800],
-                    border: `2px solid ${selectedPostType === pt.id ? PURPLE[600] : PURPLE[100]}`,
+                    background: selectedPostType === pt.id ? `linear-gradient(135deg, ${PURPLE[600]}, ${PURPLE[800]})` : T.cardBg,
+                    color: selectedPostType === pt.id ? "white" : T.text,
+                    border: `2px solid ${selectedPostType === pt.id ? PURPLE[600] : T.cardBorder}`,
                     borderRadius: 16,
                     padding: "16px 12px",
                     cursor: "pointer",
@@ -2172,7 +2222,7 @@ Return JSON only:
             <h3 style={{
               fontSize: 16,
               fontWeight: 700,
-              color: PURPLE[800],
+              color: T.text,
               marginBottom: 16,
               fontFamily: "'Tajawal', sans-serif",
             }}>
@@ -2186,7 +2236,7 @@ Return JSON only:
                 width: "100%",
                 minHeight: 100,
                 borderRadius: 16,
-                border: `2px solid ${PURPLE[100]}`,
+                border: `2px solid ${T.inputBorder}`,
                 padding: 16,
                 fontSize: 15,
                 fontFamily: "'Tajawal', sans-serif",
@@ -2195,26 +2245,28 @@ Return JSON only:
                 outline: "none",
                 boxSizing: "border-box",
                 transition: "border-color 0.2s",
+                background: T.inputBg,
+                color: T.text,
               }}
               onFocus={(e) => e.target.style.borderColor = PURPLE[400]}
-              onBlur={(e) => e.target.style.borderColor = PURPLE[100]}
+              onBlur={(e) => e.target.style.borderColor = T.inputBorder}
             />
           </div>
 
           {/* Agent Memory Preview */}
           <div style={{
-            background: PURPLE[50],
+            background: T.softBg,
             borderRadius: 20,
             padding: 24,
             marginBottom: 32,
-            border: `1px solid ${PURPLE[100]}`,
+            border: `1px solid ${T.cardBorder}`,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 20 }}>🧠</span>
               <span style={{
                 fontSize: 15,
                 fontWeight: 700,
-                color: PURPLE[800],
+                color: T.text,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
                 الوكيل بيستخدم هالمعلومات المتعلمة:
@@ -2225,19 +2277,19 @@ Return JSON only:
                 <span
                   key={i}
                   style={{
-                    background: "white",
-                    color: PURPLE[700],
+                    background: T.tagBg,
+                    color: T.tagText,
                     padding: "6px 14px",
                     borderRadius: 10,
                     fontSize: 13,
                     fontFamily: "'Tajawal', sans-serif",
-                    border: `1px solid ${PURPLE[200]}`,
+                    border: `1px solid ${T.tagBorder}`,
                   }}
                 >
                   {p.pattern}
                   <span style={{
                     marginRight: 6,
-                    color: PURPLE[400],
+                    color: T.textMuted,
                     fontSize: 11,
                   }}>
                     ({Math.round(p.weight * 100)}%)
@@ -2246,13 +2298,13 @@ Return JSON only:
               ))}
               {agentMemory.rejectionReasons.length > 0 && (
                 <span style={{
-                  background: "#fef2f2",
-                  color: "#dc2626",
+                  background: T.errorBg,
+                  color: T.errorText,
                   padding: "6px 14px",
                   borderRadius: 10,
                   fontSize: 13,
                   fontFamily: "'Tajawal', sans-serif",
-                  border: "1px solid #fecaca",
+                  border: `1px solid ${T.errorBorder}`,
                 }}>
                   🚫 يتجنب: {agentMemory.rejectionReasons.length} نمط مرفوض
                 </span>
@@ -2289,7 +2341,7 @@ Return JSON only:
               background: selectedPostType
                 ? `linear-gradient(135deg, ${PURPLE[600]}, ${PURPLE[800]})`
                 : "#e2e8f0",
-              color: selectedPostType ? "white" : "#94a3b8",
+              color: selectedPostType ? "white" : T.textMuted,
               border: "none",
               padding: "18px 36px",
               borderRadius: 16,
@@ -2319,9 +2371,9 @@ Return JSON only:
             style={{
               width: "100%",
               marginTop: 12,
-              background: trainingMode ? `linear-gradient(135deg, #f59e0b, #d97706)` : "white",
-              color: trainingMode ? "white" : PURPLE[700],
-              border: `2px solid ${trainingMode ? "#d97706" : PURPLE[200]}`,
+              background: trainingMode ? `linear-gradient(135deg, #f59e0b, #d97706)` : T.cardBg,
+              color: trainingMode ? "white" : T.tagText,
+              border: `2px solid ${trainingMode ? "#d97706" : T.cardBorder}`,
               padding: "14px 36px",
               borderRadius: 16,
               fontSize: 16,
@@ -2338,7 +2390,7 @@ Return JSON only:
           {trainingMode && (
             <div style={{
               marginTop: 24,
-              background: "white",
+              background: T.cardBg,
               borderRadius: 24,
               padding: 28,
               border: `2px solid #f59e0b`,
@@ -2355,7 +2407,7 @@ Return JSON only:
                 <h3 style={{
                   fontSize: 20,
                   fontWeight: 800,
-                  color: PURPLE[900],
+                  color: T.text,
                   fontFamily: "'Tajawal', sans-serif",
                   margin: 0,
                 }}>
@@ -2365,7 +2417,7 @@ Return JSON only:
 
               <p style={{
                 fontSize: 14,
-                color: "#64748b",
+                color: T.textSecondary,
                 marginBottom: 16,
                 fontFamily: "'Tajawal', sans-serif",
                 direction: "rtl",
@@ -2384,14 +2436,16 @@ Return JSON only:
                     flex: 1,
                     padding: "12px 16px",
                     borderRadius: 12,
-                    border: `2px solid ${PURPLE[100]}`,
+                    border: `2px solid ${T.inputBorder}`,
                     fontSize: 15,
                     fontFamily: "'Tajawal', sans-serif",
                     direction: "rtl",
                     outline: "none",
+                    background: T.inputBg,
+                    color: T.text,
                   }}
                   onFocus={(e) => e.target.style.borderColor = "#f59e0b"}
-                  onBlur={(e) => e.target.style.borderColor = PURPLE[100]}
+                  onBlur={(e) => e.target.style.borderColor = T.inputBorder}
                   onKeyDown={(e) => e.key === "Enter" && handleStartTraining()}
                 />
                 <button
@@ -2428,10 +2482,10 @@ Return JSON only:
                 }}>
                   <span style={{
                     fontSize: 13,
-                    color: PURPLE[700],
+                    color: T.tagText,
                     fontFamily: "'Tajawal', sans-serif",
-                    background: PURPLE[50],
-                    border: `1px solid ${PURPLE[200]}`,
+                    background: T.softBg,
+                    border: `1px solid ${T.softBorder}`,
                     borderRadius: 10,
                     padding: "6px 12px",
                   }}>
@@ -2479,9 +2533,9 @@ Return JSON only:
                       ❤️ لايك: {trainingLikedIndexes.length}
                     </span>
                     <span style={{
-                      background: "#fef2f2",
-                      color: "#b91c1c",
-                      border: "1px solid #fecaca",
+                      background: T.errorBg,
+                      color: T.errorText,
+                      border: `1px solid ${T.errorBorder}`,
                       borderRadius: 10,
                       padding: "5px 10px",
                       fontSize: 12,
@@ -2534,7 +2588,7 @@ Return JSON only:
                       borderRadius: 16,
                       overflow: "hidden",
                       border: `2px solid ${highlightColor}`,
-                      background: PURPLE[50],
+                      background: T.softBg,
                       transition: "all 0.3s",
                       boxShadow: highlightShadow,
                     }}>
@@ -2608,7 +2662,7 @@ Return JSON only:
                           <div style={{
                             width: "100%",
                             height: "100%",
-                            background: "#fef2f2",
+                            background: T.errorBg,
                             display: "flex",
                             flexDirection: "column",
                             alignItems: "center",
@@ -2631,7 +2685,7 @@ Return JSON only:
                         <div style={{
                           fontSize: 13,
                           fontWeight: 700,
-                          color: PURPLE[800],
+                          color: T.text,
                           fontFamily: "'Tajawal', sans-serif",
                           marginBottom: 5,
                         }}>
@@ -2640,14 +2694,14 @@ Return JSON only:
                         {item.direction && (
                           <div style={{
                             fontSize: 11,
-                            color: "#64748b",
+                            color: T.textSecondary,
                             fontFamily: "monospace",
                             lineHeight: 1.5,
                             marginBottom: 8,
                             direction: "ltr",
                             textAlign: "left",
-                            background: "white",
-                            border: `1px solid ${PURPLE[100]}`,
+                            background: T.inputBg,
+                            border: `1px solid ${T.inputBorder}`,
                             borderRadius: 8,
                             padding: "6px 8px",
                             whiteSpace: "nowrap",
@@ -2662,9 +2716,9 @@ Return JSON only:
                             onClick={() => item.status === "done" && item.image && handleOpenTrainingPreview(i)}
                             disabled={item.status !== "done" || !item.image}
                             style={{
-                              background: item.status === "done" && item.image ? "white" : "#e2e8f0",
-                              color: item.status === "done" && item.image ? PURPLE[700] : "#94a3b8",
-                              border: `1px solid ${item.status === "done" && item.image ? PURPLE[200] : "#cbd5e1"}`,
+                              background: item.status === "done" && item.image ? T.cardBg : "#e2e8f0",
+                              color: item.status === "done" && item.image ? T.tagText : "#94a3b8",
+                              border: `1px solid ${item.status === "done" && item.image ? T.cardBorder : "#cbd5e1"}`,
                               borderRadius: 10,
                               padding: "6px 10px",
                               cursor: item.status === "done" && item.image ? "zoom-in" : "not-allowed",
@@ -2726,8 +2780,8 @@ Return JSON only:
                     onClick={() => !isTraining && handleStartTraining()}
                     style={{
                       borderRadius: 16,
-                      border: `2px dashed ${PURPLE[200]}`,
-                      background: PURPLE[50],
+                      border: `2px dashed ${T.softBorder}`,
+                      background: T.softBg,
                       display: "flex",
                       flexDirection: "column",
                       alignItems: "center",
@@ -2912,17 +2966,17 @@ Return JSON only:
           {/* Error State */}
           {generateError && (
             <div style={{
-              background: "#fef2f2",
+              background: T.errorBg,
               borderRadius: 20,
               padding: 32,
               textAlign: "center",
-              border: "1px solid #fecaca",
+              border: `1px solid ${T.errorBorder}`,
             }}>
               <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
               <h3 style={{
                 fontSize: 18,
                 fontWeight: 700,
-                color: "#dc2626",
+                color: T.errorText,
                 marginBottom: 8,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
@@ -2930,7 +2984,7 @@ Return JSON only:
               </h3>
               <p style={{
                 fontSize: 14,
-                color: "#64748b",
+                color: T.textSecondary,
                 marginBottom: 20,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
@@ -2996,8 +3050,8 @@ Return JSON only:
               {/* Image Generation Error */}
               {!generatedImage && imageError && (
                 <div style={{
-                  background: "#fef2f2",
-                  border: "1px solid #fecaca",
+                  background: T.errorBg,
+                  border: `1px solid ${T.errorBorder}`,
                   borderRadius: 16,
                   padding: 20,
                   marginBottom: 16,
@@ -3119,15 +3173,15 @@ Return JSON only:
               {(lastGenerationContext?.finalImagePrompt || generatedContent.imagePrompt) && (
                 <div style={{
                   marginTop: 16,
-                  background: PURPLE[50],
+                  background: T.softBg,
                   borderRadius: 16,
                   padding: 20,
-                  border: `1px solid ${PURPLE[100]}`,
+                  border: `1px solid ${T.cardBorder}`,
                 }}>
                   <div style={{
                     fontSize: 13,
                     fontWeight: 700,
-                    color: PURPLE[700],
+                    color: T.tagText,
                     marginBottom: 8,
                     fontFamily: "'Tajawal', sans-serif",
                   }}>
@@ -3135,15 +3189,15 @@ Return JSON only:
                   </div>
                   <div style={{
                     fontSize: 13,
-                    color: "#64748b",
+                    color: T.textSecondary,
                     lineHeight: 1.8,
                     fontFamily: "monospace",
                     direction: "ltr",
                     textAlign: "left",
-                    background: "white",
+                    background: T.inputBg,
                     padding: 12,
                     borderRadius: 10,
-                    border: `1px solid ${PURPLE[100]}`,
+                    border: `1px solid ${T.cardBorder}`,
                   }}>
                     {lastGenerationContext?.finalImagePrompt || generatedContent.imagePrompt}
                   </div>
@@ -3158,7 +3212,7 @@ Return JSON only:
               <h3 style={{
                 fontSize: 18,
                 fontWeight: 700,
-                color: PURPLE[900],
+                color: T.text,
                 marginBottom: 16,
                 textAlign: "center",
                 fontFamily: "'Tajawal', sans-serif",
@@ -3208,7 +3262,7 @@ Return JSON only:
               <p style={{
                 textAlign: "center",
                 fontSize: 14,
-                color: "#94a3b8",
+                color: T.textMuted,
                 marginBottom: 16,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
@@ -3221,9 +3275,9 @@ Return JSON only:
                     key={r.id}
                     onClick={() => handleFeedback(false, r.id)}
                     style={{
-                      background: "#fef2f2",
-                      color: "#dc2626",
-                      border: "1px solid #fecaca",
+                      background: T.errorBg,
+                      color: T.errorText,
+                      border: `1px solid ${T.errorBorder}`,
                       padding: "8px 16px",
                       borderRadius: 12,
                       fontSize: 13,
@@ -3232,8 +3286,8 @@ Return JSON only:
                       fontWeight: 600,
                       transition: "all 0.2s",
                     }}
-                    onMouseOver={(e) => e.target.style.background = "#fecaca"}
-                    onMouseOut={(e) => e.target.style.background = "#fef2f2"}
+                    onMouseOver={(e) => e.target.style.background = darkMode ? "rgba(220,38,38,0.25)" : "#fecaca"}
+                    onMouseOut={(e) => e.target.style.background = darkMode ? T.errorBg : T.errorBg}
                   >
                     {r.emoji} {r.label}
                   </button>
@@ -3243,18 +3297,18 @@ Return JSON only:
           ) : generatedContent && feedbackGiven ? (
             <div style={{
               marginTop: 24,
-              background: PURPLE[50],
+              background: T.softBg,
               borderRadius: 20,
               padding: 24,
               textAlign: "center",
-              border: `1px solid ${PURPLE[100]}`,
+              border: `1px solid ${T.cardBorder}`,
               animation: "fadeUp 0.4s ease",
             }}>
               <div style={{ fontSize: 40, marginBottom: 12 }}>🧠✨</div>
               <h3 style={{
                 fontSize: 18,
                 fontWeight: 700,
-                color: PURPLE[800],
+                color: T.text,
                 marginBottom: 8,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
@@ -3262,7 +3316,7 @@ Return JSON only:
               </h3>
               <p style={{
                 fontSize: 14,
-                color: "#64748b",
+                color: T.textSecondary,
                 marginBottom: 20,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
@@ -3297,9 +3351,9 @@ Return JSON only:
                 <button
                   onClick={() => setCurrentPage("memory")}
                   style={{
-                    background: "white",
-                    color: PURPLE[700],
-                    border: `2px solid ${PURPLE[200]}`,
+                    background: T.cardBg,
+                    color: T.tagText,
+                    border: `2px solid ${T.softBorder}`,
                     padding: "12px 28px",
                     borderRadius: 14,
                     fontSize: 15,
@@ -3334,7 +3388,7 @@ Return JSON only:
         style={{
           background: "none",
           border: "none",
-          color: PURPLE[600],
+          color: T.tagText,
           fontSize: 15,
           cursor: "pointer",
           marginBottom: 24,
@@ -3351,13 +3405,13 @@ Return JSON only:
           <h2 style={{
             fontSize: 28,
             fontWeight: 800,
-            color: PURPLE[900],
+            color: T.text,
             fontFamily: "'Tajawal', sans-serif",
           }}>
             ذاكرة الوكيل
           </h2>
           <p style={{
-            color: "#64748b",
+            color: T.textSecondary,
             fontSize: 14,
             fontFamily: "'Tajawal', sans-serif",
           }}>
@@ -3368,17 +3422,17 @@ Return JSON only:
 
       {/* Style Profile */}
       <div style={{
-        background: "white",
+        background: T.cardBg,
         borderRadius: 24,
         padding: 28,
         marginBottom: 20,
-        border: `1px solid ${PURPLE[100]}`,
-        boxShadow: "0 4px 20px rgba(147,51,234,0.06)",
+        border: `1px solid ${T.cardBorder}`,
+        boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(147,51,234,0.06)",
       }}>
         <h3 style={{
           fontSize: 18,
           fontWeight: 700,
-          color: PURPLE[800],
+          color: T.text,
           marginBottom: 16,
           fontFamily: "'Tajawal', sans-serif",
           display: "flex",
@@ -3388,8 +3442,8 @@ Return JSON only:
           <span>🎨</span> ملف الستايل المتعلّم
         </h3>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div style={{ background: PURPLE[50], borderRadius: 16, padding: 16 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>الألوان المفضلة</div>
+          <div style={{ background: T.softBg, borderRadius: 16, padding: 16 }}>
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>الألوان المفضلة</div>
             <div style={{ display: "flex", gap: 6 }}>
               {agentMemory.styleProfile.preferredColors.map((c, i) => (
                 <div key={i} style={{
@@ -3403,21 +3457,21 @@ Return JSON only:
               ))}
             </div>
           </div>
-          <div style={{ background: PURPLE[50], borderRadius: 16, padding: 16 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>التكوين</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+          <div style={{ background: T.softBg, borderRadius: 16, padding: 16 }}>
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>التكوين</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: T.text, fontFamily: "'Tajawal', sans-serif" }}>
               {COMPOSITION_LABELS_AR[agentMemory.styleProfile.preferredComposition] || agentMemory.styleProfile.preferredComposition}
             </div>
           </div>
-          <div style={{ background: PURPLE[50], borderRadius: 16, padding: 16 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>موقع النص</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+          <div style={{ background: T.softBg, borderRadius: 16, padding: 16 }}>
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>موقع النص</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: T.text, fontFamily: "'Tajawal', sans-serif" }}>
               {PLACEMENT_LABELS_AR[agentMemory.styleProfile.textPlacement] || agentMemory.styleProfile.textPlacement}
             </div>
           </div>
-          <div style={{ background: PURPLE[50], borderRadius: 16, padding: 16 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>الخط العربي</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+          <div style={{ background: T.softBg, borderRadius: 16, padding: 16 }}>
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>الخط العربي</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: T.text, fontFamily: "'Tajawal', sans-serif" }}>
               {FONT_LABELS_AR[agentMemory.styleProfile.arabicFont] || agentMemory.styleProfile.arabicFont}
             </div>
           </div>
@@ -3426,17 +3480,17 @@ Return JSON only:
 
       {/* Scoring Engine Metrics */}
       <div style={{
-        background: "white",
+        background: T.cardBg,
         borderRadius: 24,
         padding: 28,
         marginBottom: 20,
-        border: `1px solid ${PURPLE[200]}`,
-        boxShadow: "0 4px 20px rgba(147,51,234,0.06)",
+        border: `1px solid ${T.cardBorder}`,
+        boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(147,51,234,0.06)",
       }}>
         <h3 style={{
           fontSize: 18,
           fontWeight: 700,
-          color: PURPLE[800],
+          color: T.text,
           marginBottom: 14,
           fontFamily: "'Tajawal', sans-serif",
           display: "flex",
@@ -3448,9 +3502,9 @@ Return JSON only:
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <span style={{
-            background: PURPLE[50],
-            color: PURPLE[700],
-            border: `1px solid ${PURPLE[100]}`,
+            background: T.softBg,
+            color: T.tagText,
+            border: `1px solid ${T.cardBorder}`,
             padding: "6px 12px",
             borderRadius: 10,
             fontSize: 13,
@@ -3459,9 +3513,9 @@ Return JSON only:
             التقييمات: {totalFeedback}
           </span>
           <span style={{
-            background: "#ecfdf5",
-            color: "#047857",
-            border: "1px solid #bbf7d0",
+            background: T.successBg,
+            color: T.successText,
+            border: `1px solid ${T.successBorder}`,
             padding: "6px 12px",
             borderRadius: 10,
             fontSize: 13,
@@ -3472,49 +3526,49 @@ Return JSON only:
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
-          <div style={{ background: PURPLE[50], borderRadius: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل تكوين</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+          <div style={{ background: T.softBg, borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل تكوين</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "'Tajawal', sans-serif" }}>
               {COMPOSITION_LABELS_AR[topComposition?.[0]] || topComposition?.[0] || "—"}
             </div>
-            <div style={{ fontSize: 12, color: PURPLE[500], fontFamily: "monospace" }}>
+            <div style={{ fontSize: 12, color: T.textMuted, fontFamily: "monospace" }}>
               {Math.round(((topComposition?.[1]?.score || 0) * 100))}%
             </div>
           </div>
-          <div style={{ background: PURPLE[50], borderRadius: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل خط</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+          <div style={{ background: T.softBg, borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل خط</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "'Tajawal', sans-serif" }}>
               {FONT_LABELS_AR[topFont?.[0]] || topFont?.[0] || "—"}
             </div>
-            <div style={{ fontSize: 12, color: PURPLE[500], fontFamily: "monospace" }}>
+            <div style={{ fontSize: 12, color: T.textMuted, fontFamily: "monospace" }}>
               {Math.round(((topFont?.[1]?.score || 0) * 100))}%
             </div>
           </div>
-          <div style={{ background: PURPLE[50], borderRadius: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل موقع نص</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif" }}>
+          <div style={{ background: T.softBg, borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 4, fontFamily: "'Tajawal', sans-serif" }}>أفضل موقع نص</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "'Tajawal', sans-serif" }}>
               {PLACEMENT_LABELS_AR[topTextPlacement?.[0]] || topTextPlacement?.[0] || "—"}
             </div>
-            <div style={{ fontSize: 12, color: PURPLE[500], fontFamily: "monospace" }}>
+            <div style={{ fontSize: 12, color: T.textMuted, fontFamily: "monospace" }}>
               {Math.round(((topTextPlacement?.[1]?.score || 0) * 100))}%
             </div>
           </div>
         </div>
 
-        <div style={{ background: PURPLE[50], borderRadius: 12, padding: 12 }}>
-          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8, fontFamily: "'Tajawal', sans-serif" }}>أفضل الألوان أداءً</div>
+        <div style={{ background: T.softBg, borderRadius: 12, padding: 12 }}>
+          <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8, fontFamily: "'Tajawal', sans-serif" }}>أفضل الألوان أداءً</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {topColors.map(([color, stats]) => (
               <span key={color} style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                background: "white",
-                border: `1px solid ${PURPLE[100]}`,
+                background: T.tagBg,
+                border: `1px solid ${T.cardBorder}`,
                 borderRadius: 10,
                 padding: "5px 9px",
                 fontSize: 12,
-                color: PURPLE[700],
+                color: T.tagText,
                 fontFamily: "monospace",
               }}>
                 <span style={{
@@ -3533,17 +3587,17 @@ Return JSON only:
 
       {/* Learned Patterns */}
       <div style={{
-        background: "white",
+        background: T.cardBg,
         borderRadius: 24,
         padding: 28,
         marginBottom: 20,
-        border: `1px solid ${PURPLE[100]}`,
-        boxShadow: "0 4px 20px rgba(147,51,234,0.06)",
+        border: `1px solid ${T.cardBorder}`,
+        boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(147,51,234,0.06)",
       }}>
         <h3 style={{
           fontSize: 18,
           fontWeight: 700,
-          color: PURPLE[800],
+          color: T.text,
           marginBottom: 16,
           fontFamily: "'Tajawal', sans-serif",
           display: "flex",
@@ -3558,14 +3612,14 @@ Return JSON only:
             alignItems: "center",
             justifyContent: "space-between",
             padding: "12px 16px",
-            background: i % 2 === 0 ? PURPLE[50] : "transparent",
+            background: i % 2 === 0 ? T.softBg : "transparent",
             borderRadius: 12,
             marginBottom: 4,
           }}>
-            <span style={{ fontSize: 14, color: PURPLE[800], fontFamily: "'Tajawal', sans-serif", flex: 1 }}>
+            <span style={{ fontSize: 14, color: T.text, fontFamily: "'Tajawal', sans-serif", flex: 1 }}>
               {p.pattern}
               {p.source === "manual" && (
-                <span style={{ fontSize: 10, color: PURPLE[400], marginRight: 6, background: PURPLE[50], padding: "2px 6px", borderRadius: 4 }}>يدوي</span>
+                <span style={{ fontSize: 10, color: T.textMuted, marginRight: 6, background: T.softBg, padding: "2px 6px", borderRadius: 4 }}>يدوي</span>
               )}
               {p.source === "image-analysis" && (
                 <span style={{ fontSize: 10, color: "#f472b6", marginRight: 6, background: "#fdf2f8", padding: "2px 6px", borderRadius: 4 }}>من صورة</span>
@@ -3579,7 +3633,7 @@ Return JSON only:
               <div style={{
                 width: 60,
                 height: 6,
-                background: PURPLE[100],
+                background: darkMode ? PURPLE[900] : PURPLE[100],
                 borderRadius: 3,
                 overflow: "hidden",
               }}>
@@ -3590,7 +3644,7 @@ Return JSON only:
                   borderRadius: 3,
                 }} />
               </div>
-              <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 35 }}>
+              <span style={{ fontSize: 12, color: T.textMuted, minWidth: 35 }}>
                 {Math.round(p.weight * 100)}%
               </span>
               <button
@@ -3606,7 +3660,7 @@ Return JSON only:
                   lineHeight: 1,
                   transition: "background 0.2s",
                 }}
-                onMouseEnter={(e) => e.target.style.background = "#fef2f2"}
+                onMouseEnter={(e) => e.target.style.background = T.errorBg}
                 onMouseLeave={(e) => e.target.style.background = "none"}
                 title="حذف النمط"
               >
@@ -3620,14 +3674,14 @@ Return JSON only:
         <div style={{
           marginTop: 16,
           padding: 16,
-          background: PURPLE[50],
+          background: T.softBg,
           borderRadius: 16,
-          border: `1px dashed ${PURPLE[200]}`,
+          border: `1px dashed ${T.softBorder}`,
         }}>
           <div style={{
             fontSize: 13,
             fontWeight: 700,
-            color: PURPLE[700],
+            color: T.tagText,
             marginBottom: 10,
             fontFamily: "'Tajawal', sans-serif",
           }}>
@@ -3645,17 +3699,19 @@ Return JSON only:
                 minWidth: 180,
                 padding: "10px 14px",
                 borderRadius: 12,
-                border: `2px solid ${PURPLE[100]}`,
+                border: `2px solid ${T.inputBorder}`,
                 fontSize: 14,
                 fontFamily: "'Tajawal', sans-serif",
                 direction: "rtl",
                 outline: "none",
+                background: T.inputBg,
+                color: T.text,
               }}
               onFocus={(e) => e.target.style.borderColor = PURPLE[400]}
-              onBlur={(e) => e.target.style.borderColor = PURPLE[100]}
+              onBlur={(e) => e.target.style.borderColor = T.inputBorder}
             />
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 12, color: PURPLE[600], fontFamily: "'Tajawal', sans-serif", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: 12, color: T.tagText, fontFamily: "'Tajawal', sans-serif", whiteSpace: "nowrap" }}>
                 الوزن: {Math.round(newPatternWeight * 100)}%
               </span>
               <input
@@ -3694,17 +3750,17 @@ Return JSON only:
 
       {/* Image Style Analysis Card */}
       <div style={{
-        background: "white",
+        background: T.cardBg,
         borderRadius: 24,
         padding: 28,
         marginBottom: 20,
-        border: `1px solid ${PURPLE[100]}`,
-        boxShadow: "0 4px 20px rgba(147,51,234,0.06)",
+        border: `1px solid ${T.cardBorder}`,
+        boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(147,51,234,0.06)",
       }}>
         <h3 style={{
           fontSize: 18,
           fontWeight: 700,
-          color: PURPLE[800],
+          color: T.text,
           marginBottom: 8,
           fontFamily: "'Tajawal', sans-serif",
           display: "flex",
@@ -3715,7 +3771,7 @@ Return JSON only:
         </h3>
         <p style={{
           fontSize: 13,
-          color: "#64748b",
+          color: T.textSecondary,
           fontFamily: "'Tajawal', sans-serif",
           marginBottom: 16,
         }}>
@@ -3730,8 +3786,8 @@ Return JSON only:
           justifyContent: "center",
           padding: styleImagePreview ? 12 : 32,
           borderRadius: 16,
-          border: `2px dashed ${PURPLE[200]}`,
-          background: PURPLE[50],
+          border: `2px dashed ${T.softBorder}`,
+          background: T.softBg,
           cursor: "pointer",
           transition: "all 0.2s",
           marginBottom: 16,
@@ -3758,7 +3814,7 @@ Return JSON only:
               <span style={{ fontSize: 40, marginBottom: 8 }}>🖼️</span>
               <span style={{
                 fontSize: 14,
-                color: PURPLE[600],
+                color: T.tagText,
                 fontWeight: 600,
                 fontFamily: "'Tajawal', sans-serif",
               }}>
@@ -3766,7 +3822,7 @@ Return JSON only:
               </span>
               <span style={{
                 fontSize: 12,
-                color: "#94a3b8",
+                color: T.textMuted,
                 fontFamily: "'Tajawal', sans-serif",
                 marginTop: 4,
               }}>
@@ -3806,15 +3862,15 @@ Return JSON only:
         {/* Analysis Results */}
         {styleAnalysisResult && !styleAnalysisResult.error && styleAnalysisResult.patterns && (
           <div style={{
-            background: "#ecfdf5",
+            background: T.successBg,
             borderRadius: 16,
             padding: 16,
-            border: "1px solid #bbf7d0",
+            border: `1px solid ${T.successBorder}`,
           }}>
             <div style={{
               fontSize: 13,
               fontWeight: 700,
-              color: "#059669",
+              color: T.successText,
               marginBottom: 10,
               fontFamily: "'Tajawal', sans-serif",
             }}>
@@ -3836,12 +3892,12 @@ Return JSON only:
         {/* Error State */}
         {styleAnalysisResult?.error && (
           <div style={{
-            background: "#fef2f2",
+            background: T.errorBg,
             borderRadius: 16,
             padding: 16,
-            border: "1px solid #fecaca",
+            border: `1px solid ${T.errorBorder}`,
             fontSize: 14,
-            color: "#dc2626",
+            color: T.errorText,
             fontFamily: "'Tajawal', sans-serif",
           }}>
             ❌ {styleAnalysisResult.error}
@@ -3851,17 +3907,17 @@ Return JSON only:
 
       {/* Style Reference Library */}
       <div style={{
-        background: "white",
+        background: T.cardBg,
         borderRadius: 24,
         padding: 28,
         marginBottom: 20,
-        border: `1px solid ${PURPLE[100]}`,
-        boxShadow: "0 4px 20px rgba(147,51,234,0.06)",
+        border: `1px solid ${T.cardBorder}`,
+        boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(147,51,234,0.06)",
       }}>
         <h3 style={{
           fontSize: 18,
           fontWeight: 700,
-          color: PURPLE[800],
+          color: T.text,
           marginBottom: 8,
           fontFamily: "'Tajawal', sans-serif",
           display: "flex",
@@ -3872,7 +3928,7 @@ Return JSON only:
         </h3>
         <p style={{
           fontSize: 13,
-          color: "#64748b",
+          color: T.textSecondary,
           fontFamily: "'Tajawal', sans-serif",
           marginBottom: 16,
         }}>
@@ -3884,15 +3940,15 @@ Return JSON only:
           display: "inline-flex",
           alignItems: "center",
           gap: 6,
-          background: styleRefs.length > 0 ? "#ecfdf5" : PURPLE[50],
-          color: styleRefs.length > 0 ? "#059669" : PURPLE[600],
+          background: styleRefs.length > 0 ? T.successBg : T.softBg,
+          color: styleRefs.length > 0 ? T.successText : T.tagText,
           padding: "6px 14px",
           borderRadius: 10,
           fontSize: 13,
           fontWeight: 700,
           fontFamily: "'Tajawal', sans-serif",
           marginBottom: 16,
-          border: `1px solid ${styleRefs.length > 0 ? "#bbf7d0" : PURPLE[100]}`,
+          border: `1px solid ${styleRefs.length > 0 ? T.successBorder : T.cardBorder}`,
         }}>
           {styleRefsLoading
             ? "⏳ جاري التحميل..."
@@ -3913,9 +3969,9 @@ Return JSON only:
                 position: "relative",
                 borderRadius: 12,
                 overflow: "hidden",
-                border: `2px solid ${PURPLE[100]}`,
+                border: `2px solid ${T.cardBorder}`,
                 aspectRatio: "1",
-                background: PURPLE[50],
+                background: T.softBg,
               }}>
                 <img
                   src={ref.thumbnail}
@@ -3966,8 +4022,8 @@ Return JSON only:
           justifyContent: "center",
           padding: 24,
           borderRadius: 16,
-          border: `2px dashed ${PURPLE[200]}`,
-          background: PURPLE[50],
+          border: `2px dashed ${T.softBorder}`,
+          background: T.softBg,
           cursor: "pointer",
           transition: "all 0.2s",
         }}>
@@ -3981,7 +4037,7 @@ Return JSON only:
           <span style={{ fontSize: 32, marginBottom: 6 }}>📤</span>
           <span style={{
             fontSize: 14,
-            color: PURPLE[600],
+            color: T.tagText,
             fontWeight: 600,
             fontFamily: "'Tajawal', sans-serif",
           }}>
@@ -3989,7 +4045,7 @@ Return JSON only:
           </span>
           <span style={{
             fontSize: 12,
-            color: "#94a3b8",
+            color: T.textMuted,
             fontFamily: "'Tajawal', sans-serif",
             marginTop: 4,
           }}>
@@ -4001,7 +4057,7 @@ Return JSON only:
           <div style={{
             marginTop: 12,
             fontSize: 12,
-            color: "#94a3b8",
+            color: T.textMuted,
             fontFamily: "'Tajawal', sans-serif",
             textAlign: "center",
           }}>
@@ -4023,17 +4079,17 @@ Return JSON only:
 
       {/* Rejection Memory */}
       <div style={{
-        background: "white",
+        background: T.cardBg,
         borderRadius: 24,
         padding: 28,
         marginBottom: 20,
-        border: "1px solid #fecaca",
-        boxShadow: "0 4px 20px rgba(220,38,38,0.06)",
+        border: `1px solid ${T.errorBorder}`,
+        boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(220,38,38,0.06)",
       }}>
         <h3 style={{
           fontSize: 18,
           fontWeight: 700,
-          color: "#dc2626",
+          color: T.errorText,
           marginBottom: 16,
           fontFamily: "'Tajawal', sans-serif",
           display: "flex",
@@ -4045,7 +4101,7 @@ Return JSON only:
         {agentMemory.rejectionReasons.length === 0 ? (
           <p style={{
             fontSize: 14,
-            color: "#94a3b8",
+            color: T.textMuted,
             fontFamily: "'Tajawal', sans-serif",
             textAlign: "center",
             padding: 20,
@@ -4059,17 +4115,17 @@ Return JSON only:
               alignItems: "center",
               gap: 10,
               padding: "10px 16px",
-              background: "#fef2f2",
+              background: T.errorBg,
               borderRadius: 12,
               marginBottom: 8,
             }}>
               <span style={{ fontSize: 18 }}>
                 {rejectionReasons.find((rr) => rr.id === r.reason)?.emoji || "❌"}
               </span>
-              <span style={{ fontSize: 14, color: "#dc2626", fontFamily: "'Tajawal', sans-serif" }}>
+              <span style={{ fontSize: 14, color: T.errorText, fontFamily: "'Tajawal', sans-serif" }}>
                 {rejectionReasons.find((rr) => rr.id === r.reason)?.label || r.reason}
               </span>
-              <span style={{ fontSize: 12, color: "#94a3b8", marginRight: "auto" }}>
+              <span style={{ fontSize: 12, color: T.textMuted, marginRight: "auto" }}>
                 {r.type === "manual" ? "يدوي" : `بوست: ${postTypes.find((pt) => pt.id === r.type)?.label || r.type}`}
               </span>
               <button
@@ -4099,9 +4155,9 @@ Return JSON only:
         <div style={{
           marginTop: 16,
           padding: 16,
-          background: "#fef2f2",
+          background: T.errorBg,
           borderRadius: 16,
-          border: "1px dashed #fecaca",
+          border: `1px dashed ${T.errorBorder}`,
         }}>
           <div style={{
             fontSize: 13,
@@ -4123,14 +4179,16 @@ Return JSON only:
                 flex: 1,
                 padding: "10px 14px",
                 borderRadius: 12,
-                border: "2px solid #fecaca",
+                border: `2px solid ${T.errorBorder}`,
                 fontSize: 14,
                 fontFamily: "'Tajawal', sans-serif",
                 direction: "rtl",
                 outline: "none",
+                background: T.inputBg,
+                color: T.text,
               }}
               onFocus={(e) => e.target.style.borderColor = "#dc2626"}
-              onBlur={(e) => e.target.style.borderColor = "#fecaca"}
+              onBlur={(e) => e.target.style.borderColor = T.errorBorder}
             />
             <button
               onClick={handleAddRejection}
@@ -4158,16 +4216,16 @@ Return JSON only:
 
       {/* Success Memory */}
       <div style={{
-        background: "white",
+        background: T.cardBg,
         borderRadius: 24,
         padding: 28,
-        border: "1px solid #bbf7d0",
-        boxShadow: "0 4px 20px rgba(5,150,105,0.06)",
+        border: `1px solid ${T.successBorder}`,
+        boxShadow: darkMode ? "0 4px 20px rgba(0,0,0,0.2)" : "0 4px 20px rgba(5,150,105,0.06)",
       }}>
         <h3 style={{
           fontSize: 18,
           fontWeight: 700,
-          color: "#059669",
+          color: T.successText,
           marginBottom: 16,
           fontFamily: "'Tajawal', sans-serif",
           display: "flex",
@@ -4179,7 +4237,7 @@ Return JSON only:
         {agentMemory.successfulPrompts.length === 0 ? (
           <p style={{
             fontSize: 14,
-            color: "#94a3b8",
+            color: T.textMuted,
             fontFamily: "'Tajawal', sans-serif",
             textAlign: "center",
             padding: 20,
@@ -4190,13 +4248,13 @@ Return JSON only:
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {agentMemory.successfulPrompts.map((s, i) => (
               <span key={i} style={{
-                background: "#ecfdf5",
-                color: "#059669",
+                background: T.successBg,
+                color: T.successText,
                 padding: "6px 14px",
                 borderRadius: 10,
                 fontSize: 13,
                 fontFamily: "'Tajawal', sans-serif",
-                border: "1px solid #bbf7d0",
+                border: `1px solid ${T.successBorder}`,
               }}>
                 ✅ {postTypes.find((pt) => pt.id === s.type)?.label || s.type}
               </span>
@@ -4228,21 +4286,21 @@ Return JSON only:
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "white",
+          background: T.cardBg,
           borderRadius: 28,
           padding: 36,
           maxWidth: 700,
           width: "100%",
           maxHeight: "85vh",
           overflowY: "auto",
-          boxShadow: "0 24px 80px rgba(0,0,0,0.2)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
           <h2 style={{
             fontSize: 24,
             fontWeight: 800,
-            color: PURPLE[900],
+            color: T.text,
             fontFamily: "'Tajawal', sans-serif",
           }}>
             🏗️ هندسة نظام الوكيل
@@ -4250,14 +4308,14 @@ Return JSON only:
           <button
             onClick={() => setShowArchitecture(false)}
             style={{
-              background: PURPLE[50],
+              background: T.softBg,
               border: "none",
               width: 36,
               height: 36,
               borderRadius: 12,
               fontSize: 18,
               cursor: "pointer",
-              color: PURPLE[600],
+              color: T.tagText,
             }}
           >
             ✕
@@ -4329,7 +4387,7 @@ Return JSON only:
         ].map((layer, i) => (
           <div key={i} style={{
             marginBottom: 20,
-            background: "#fafafa",
+            background: T.softBg,
             borderRadius: 20,
             padding: 24,
             borderRight: `4px solid ${layer.color}`,
@@ -4353,7 +4411,7 @@ Return JSON only:
                 <h3 style={{
                   fontSize: 17,
                   fontWeight: 700,
-                  color: "#1e293b",
+                  color: T.text,
                   fontFamily: "'Tajawal', sans-serif",
                 }}>
                   {layer.title}
@@ -4425,9 +4483,11 @@ Return JSON only:
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "linear-gradient(180deg, #faf5ff 0%, #ffffff 30%, #faf5ff 100%)",
+        background: T.pageBg,
         fontFamily: "'Tajawal', 'Segoe UI', sans-serif",
         position: "relative",
+        color: T.text,
+        transition: "background 0.4s ease, color 0.4s ease",
       }}
     >
       <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
@@ -4446,9 +4506,9 @@ Return JSON only:
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease; }
         ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: ${PURPLE[200]}; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: ${T.scrollThumb}; border-radius: 3px; }
       `}</style>
 
       <ParticleField />
@@ -4457,11 +4517,12 @@ Return JSON only:
       <nav style={{
         position: "sticky",
         top: 0,
-        background: "rgba(255,255,255,0.85)",
+        background: T.navBg,
         backdropFilter: "blur(16px)",
-        borderBottom: `1px solid ${PURPLE[100]}`,
+        borderBottom: `1px solid ${T.navBorder}`,
         zIndex: 100,
         padding: "12px 24px",
+        transition: "background 0.4s ease, border-color 0.4s ease",
       }}>
         <div style={{
           maxWidth: 900,
@@ -4478,14 +4539,14 @@ Return JSON only:
             <span style={{
               fontSize: 18,
               fontWeight: 800,
-              color: PURPLE[800],
+              color: T.logoText,
               fontFamily: "'Tajawal', sans-serif",
             }}>
               وكيل هجولة
             </span>
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {[
               { id: "home", label: "الرئيسية", emoji: "🏠" },
               { id: "generate", label: "ولّد", emoji: "✨" },
@@ -4495,8 +4556,8 @@ Return JSON only:
                 key={nav.id}
                 onClick={() => setCurrentPage(nav.id)}
                 style={{
-                  background: currentPage === nav.id ? PURPLE[100] : "transparent",
-                  color: currentPage === nav.id ? PURPLE[800] : "#64748b",
+                  background: currentPage === nav.id ? T.navBtnBg : "transparent",
+                  color: currentPage === nav.id ? T.navBtnText : T.navBtnInactive,
                   border: "none",
                   padding: "8px 16px",
                   borderRadius: 12,
@@ -4510,6 +4571,22 @@ Return JSON only:
                 {nav.emoji} {nav.label}
               </button>
             ))}
+            <button
+              onClick={toggleDarkMode}
+              style={{
+                background: darkMode ? PURPLE[800] : PURPLE[50],
+                border: `1px solid ${darkMode ? PURPLE[600] : PURPLE[200]}`,
+                borderRadius: 12,
+                padding: "7px 12px",
+                fontSize: 18,
+                cursor: "pointer",
+                lineHeight: 1,
+                transition: "all 0.3s ease",
+              }}
+              title={darkMode ? "الوضع الفاتح" : "الوضع الداكن"}
+            >
+              {darkMode ? "☀️" : "🌙"}
+            </button>
           </div>
 
           {/* Agent Level Badge */}
