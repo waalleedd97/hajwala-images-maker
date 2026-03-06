@@ -1146,23 +1146,28 @@ BACKGROUND SCENE: ${baseImagePrompt}`
         : baseImagePrompt;
 
       const imagePromptText = hasStyleRefs
-        ? `${textRuleBlock}
+        ? `CRITICAL: Match the visual style of the provided reference images FIRST.
+The reference images show the game's actual aesthetic: realistic Saudi streets,
+daylight/natural lighting, real road environments.
+Learned patterns below are suggestions only — NEVER apply them if they contradict the reference image style.
+If a learned pattern says "dark background" or "neon lighting" but the reference images show daylight or natural colors, IGNORE that pattern and follow the reference images.
+
+${textRuleBlock}
 
 Create an image for: "${postTitle}"
 
-STYLE PROFILE:
-- Color palette: ${sp.preferredColors.join(", ")}
-- Composition: ${sp.preferredComposition}
-- High contrast, dramatic lighting
-
-LEARNED PATTERNS:
-${stylePatterns}
-
-REFERENCE IMAGES (style only):
-- Learn ONLY the visual style from the ${Math.min(styleRefs.length, 3)} attached screenshots: rendering, lighting, colors, textures
+REFERENCE IMAGES (PRIMARY STYLE GUIDE — highest priority):
+- The ${Math.min(styleRefs.length, 3)} attached screenshots define the visual DNA of this game
+- Match their lighting, color grading, environment style, and rendering quality exactly
+- These images are the ground truth — everything else is secondary
 - DO NOT copy any text, words, or specific content from references
-- Match Unity 3D mid-fidelity aesthetic (NOT photorealistic)
-- KSA environments: desert, Saudi streets, drift arenas
+
+STYLE PROFILE (secondary):
+- Color palette: ${sp.preferredColors.join(", ")} (only if compatible with reference images)
+- Composition: ${sp.preferredComposition}
+
+LEARNED PATTERNS (hints only — override if they conflict with reference images):
+${stylePatterns}
 
 SCENE: ${sceneBlock}
 
